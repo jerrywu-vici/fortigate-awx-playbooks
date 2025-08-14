@@ -9,7 +9,6 @@
   tasks:
     - name: Create a new firewall address object for a test server
       fortios_firewall_address:
-        # v2.0.0+ syntax
         state: "present"
         address:
           name: "Test-Server-01"
