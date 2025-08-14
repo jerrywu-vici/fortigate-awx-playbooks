@@ -1,6 +1,6 @@
 ---
 - name: Create FortiGate Firewall Address Object
-  hosts: fortigate
+  hosts: all
   connection: httpapi
   collections:
     - fortinet.fortios
@@ -8,11 +8,10 @@
 
   tasks:
     - name: Create a new firewall address object for a test server
-      fortinet.fortios.fortios_firewall_address:
-        vdom: "root"
+      fortios_firewall_address:
+        # v2.0.0+ syntax
         state: "present"
-        firewall_address:
-          name: "AWX_Test_Object_1"
+        address:
+          name: "Test-Server-01"
+          subnet: "192.168.100.101/32"
           comment: "Managed by Ansible AWX"
-          subnet: "192.0.2.123/32"
-          type: "ipmask"
