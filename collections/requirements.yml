@@ -1,4 +1,8 @@
 ---
 collections:
   - name: fortinet.fortios
-    version: "2.4.0"
+    version: 2.4.0
+  - name: ansible.netcommon
+    version: 5.2.0
+  - name: ansible.utils
+    version: 2.11.0
