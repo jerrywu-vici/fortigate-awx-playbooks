@@ -13,9 +13,8 @@
 
   tasks:
     - name: Create a new firewall address object for a test server
-      fortios_firewall_address:
-        state: "present"
-        address:
-          name: "Test-Server-01"
-          subnet: "192.168.100.101/32"
-          comment: "Managed by Ansible AWX"
+      fortinet.fortios.fortios_firewall_address:
+      state: “present”
+      firewall_address:
+      name: test_123
+      subnet: 10.1.1.1 255.255.255.0
