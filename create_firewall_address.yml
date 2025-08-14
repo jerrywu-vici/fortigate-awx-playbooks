@@ -1,5 +1,5 @@
 ---
-- name: Create FortiGate Firewall Address Object
+- name: Create FortiGate Address Object (Official Example)
   hosts: all
   connection: httpapi
   collections:
@@ -7,9 +7,16 @@
   gather_facts: false
 
   tasks:
-    - name: Create a new firewall address object for a test server
-      fortinet.fortios.fortios_firewall_address:
-      state: “present”
-      firewall_address:
-      name: test_123
-      subnet: 10.1.1.1 255.255.255.0
+    - name: Create new firewall address for 'webserver1'
+      fortios_firewall_address:
+        # vdom 參數非常重要，即使是預設的 root 也請加上
+        vdom: "root"
+        
+        # state: "present" 確保這個物件存在
+        state: "present"
+        
+        # address 字典定義了物件的屬性
+        address:
+          name: "webserver1-official-example"
+          subnet: "192.168.1.100/32"
+          comment: "Created via official AWX example"
