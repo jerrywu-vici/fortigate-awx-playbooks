@@ -1,0 +1,23 @@
+---
+- name: Get FortiGate System Status
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Call FortiGate API to get system status
+      ansible.builtin.uri:
+        # URL 組成: 使用者定義的主機 + FortiGate API 端點
+        url: "https://{{ lookup('env', 'FORTIGATE_HOST') }}/api/v2/monitor/system/status"
+        method: GET
+        # 直接在 Headers 中帶入 API Token 進行驗證
+        headers:
+          Authorization: "Bearer {{ lookup('env', 'FORTIGATE_API_TOKEN') }}"
+        # 在測試環境中，您可能需要忽略 SSL 憑證驗證
+        # 在生產環境中，建議設為 true 並確保憑證是可信的
+        validate_certs: false
+      register: api_response
+
+    - name: Display FortiGate Status
+      ansible.builtin.debug:
+        msg: "{{ api_response.json }}"
