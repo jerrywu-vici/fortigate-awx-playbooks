@@ -1,28 +1,37 @@
 ---
 - name: Create or Update FortiGate Firewall Address
-  hosts: localhost
-  connection: local
+  # 我們直接將目標主機指向 FortiGate，而不是 localhost
+  # AWX 會從 Credential 中讀取 FORTIGATE_HOST 並將其作為 ansible_host
+  hosts: "{{ lookup('env', 'FORTIGATE_HOST') }}"
+  
+  # 明確指定使用 httpapi 連線外掛程式
+  connection: httpapi
+  
+  # 在 collections 中宣告，這是一個好習慣
+  collections:
+    - fortinet.fortios
+  
   gather_facts: false
 
-  # --- 關鍵修正 ---
-  # 在這裡設定環境變數，將您 Credential Injector 的變數
-  # 映射成 FortiOS Collection 預期讀取的變數名稱。
-  environment:
-    FORTIOS_HOST: "{{ lookup('env', 'FORTIGATE_HOST') }}"
+  # --- 標準的連線變數定義 ---
+  # httpapi 外掛程式會讀取這些 ansible_httpapi_* 變數
+  vars:
+    ansible_httpapi_use_ssl: yes
+    ansible_httpapi_validate_certs: no # 開發時設為 no
+    # 使用 lookup 將 Credential 的 Token 賦值給 httpapi 需要的變數
+    ansible_httpapi_access_token: "{{ lookup('env', 'FORTIGATE_API_TOKEN') }}"
 
   tasks:
     - name: Ensure firewall address object exists
       fortinet.fortios.fortios_firewall_address:
-        # access_token 是模組支援的參數，可以直接傳遞
-        access_token: "{{ lookup('env', 'FORTIGATE_API_TOKEN') }}"
-        
         # vdom: "root" # 如果您有多個 VDOM，請取消註解並指定
 
-        # 這裡不再需要 host 和 validate_certs 參數
+        # 模組本身不再需要任何連線參數，
+        # 因為它們都已經由 httpapi 連線外掛程式處理了。
         
         state: "present"
         firewall_address:
-          name: "{{ address_name | default('AWX_Default_Test_Address') }}"
-          subnet: "{{ address_subnet | default('1.1.1.1/32') }}"
+          name: "{{ address_name | default('AWX_Final_Test_Address') }}"
+          subnet: "{{ address_subnet | default('2.2.2.2/32') }}"
           type: "ipmask"
-          comment: "Managed by Ansible AWX"
+          comment: "Managed by Ansible AWX - Correct Method"
