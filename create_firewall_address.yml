@@ -4,20 +4,25 @@
   connection: local
   gather_facts: false
 
+  # --- 關鍵修正 ---
+  # 在這裡設定環境變數，將您 Credential Injector 的變數
+  # 映射成 FortiOS Collection 預期讀取的變數名稱。
+  environment:
+    FORTIOS_HOST: "{{ lookup('env', 'FORTIGATE_HOST') }}"
+
   tasks:
     - name: Ensure firewall address object exists
       fortinet.fortios.fortios_firewall_address:
-        # vdom: "root" # 如果您有多個 VDOM，請取消註解並指定 VDOM
-        
-        # --- 連線資訊 (自動從 Credential 讀取) ---
-        host: "{{ lookup('env', 'FORTIGATE_HOST') }}"
+        # access_token 是模組支援的參數，可以直接傳遞
         access_token: "{{ lookup('env', 'FORTIGATE_API_TOKEN') }}"
-        validate_certs: false # 開發時設為 false，生產環境建議設為 true
+        
+        # vdom: "root" # 如果您有多個 VDOM，請取消註解並指定
 
-        # --- 位址物件定義 ---
-        state: "present"  # present 表示確保物件存在 (不存在則建立，存在則更新)
+        # 這裡不再需要 host 和 validate_certs 參數
+        
+        state: "present"
         firewall_address:
-          name: "{{ address_name | default('AWX_Default_Test_Address') }}" # 位址物件名稱
-          subnet: "{{ address_subnet | default('1.1.1.1/32') }}"           # 位址物件的 IP/Subnet
-          type: "ipmask"                                                   # 類型為 IP/Mask
-          comment: "Managed by Ansible AWX"                                # 註解
+          name: "{{ address_name | default('AWX_Default_Test_Address') }}"
+          subnet: "{{ address_subnet | default('1.1.1.1/32') }}"
+          type: "ipmask"
+          comment: "Managed by Ansible AWX"
