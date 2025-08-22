@@ -1,5 +1,5 @@
 ---
-- name: Get FortiGate System Status
+- name: FortiGate Get System Status
   hosts: localhost
   connection: local
   gather_facts: false
