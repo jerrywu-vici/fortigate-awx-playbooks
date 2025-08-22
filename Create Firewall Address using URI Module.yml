@@ -1,5 +1,5 @@
 ---
-- name: Create or Update FortiGate Firewall Address using URI Module
+- name: FortiGate Create Firewall Address using URI Module
   hosts: localhost
   connection: local
   gather_facts: false
