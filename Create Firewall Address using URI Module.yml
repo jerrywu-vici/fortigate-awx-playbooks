@@ -8,6 +8,7 @@
     # 統一處理變數，確保檢查和建立時使用相同的名稱
     target_address_name: "{{ address_name | default('AWX_URI_Test_Address') }}"
     target_address_subnet: "{{ address_subnet | default('5.5.5.5 255.255.255.255') }}"
+    target_address_comment: "Managed by Ansible AWX"
 
   tasks:
     - name: 檢查防火牆位址物件是否存在
@@ -37,7 +38,7 @@
           name: "{{ target_address_name }}"
           subnet: "{{ target_address_subnet }}"
           type: "ipmask"
-          comment: "Managed by Ansible AWX"
+          comment: "{{ target_address_comment }}"
         body_format: json
         validate_certs: false
         status_code: 200
@@ -49,9 +50,9 @@
       ansible.builtin.debug:
         msg:
           - "成功建立防火牆位址物件，詳細內容如下："
-          - "  名稱 (Name): {{ create_result.json.results[0].name }}"
-          - "  子網路 (Subnet): {{ create_result.json.results[0].subnet }}"
-          - "  類型 (Type): {{ create_result.json.results[0].type }}"
-          - "  註解 (Comment): {{ create_result.json.results[0].comment | default('N/A', true) }}"
+          - "  名稱 (Name): {{ target_address_name }}"
+          - "  子網路 (Subnet): {{ target_address_subnet }}"
+          - "  類型 (Type): ipmask"
+          - "  註解 (Comment): {{ target_address_comment }}"
       # 關鍵修正：只有在 "建立" 任務被執行 (而不是被跳過) 時，才顯示此訊息
       when: create_result is not skipped
