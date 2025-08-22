@@ -5,7 +5,9 @@
   gather_facts: false
 
   vars:
-    # 統一處理變數，確保檢查和建立時使用相同的名稱
+    # 統一處理變數，確保檢查和建立時使用相同的名稱，您可以將 DHCP Server 的 ID 放在這裡或是在 AWX Templates 的 Variables 中傳入 >>
+                                                # address_name: "AWX_URI_Test_Address"
+                                                # address_subnet: "192.168.100.200 255.255.255.255"
     target_address_name: "{{ address_name | default('AWX_URI_Test_Address') }}"
     target_address_subnet: "{{ address_subnet | default('5.5.5.5 255.255.255.255') }}"
     target_address_comment: "Managed by Ansible AWX"
