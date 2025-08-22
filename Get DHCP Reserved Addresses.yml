@@ -5,7 +5,7 @@
   gather_facts: false
 
   vars:
-    # 您可以將 DHCP Server 的 ID 放在這裡或是在 AWX Templates 的 Variables 中傳入 >>server_id: "4"
+    # 您可以將 DHCP Server 的 ID 放在這裡或是在 AWX Templates 的 Variables 中傳入 >>server_id: "3"
     dhcp_server_id: "{{ server_id | default('3') }}"
 
   tasks:
@@ -20,10 +20,9 @@
         status_code: 200
       register: result
 
-    - name: 以 FortiGate CLI 格式顯示 DHCP 保留位址設定
-      ansible.builtin.debug:
-        # 使用 Jinja2 模板來動態產生 CLI 格式的輸出
-        msg: |
+    - name: 產生 FortiGate CLI 格式的輸出內容
+      ansible.builtin.set_fact:
+        cli_output: |
           config system dhcp server
               edit {{ dhcp_server_id }}
                   config reserved-address
@@ -37,5 +36,10 @@
                   end
               next
           end
-      # 只有在成功獲取到結果時才顯示
       when: result.json.results is defined and result.json.results | length > 0
+
+    - name: 以 FortiGate CLI 格式顯示 DHCP 保留位址設定
+      ansible.builtin.debug:
+        var: cli_output
+      # 只有在 cli_output 變數被成功建立時才執行
+      when: cli_output is defined
