@@ -5,7 +5,7 @@
   gather_facts: false
 
   vars:
-    # 您可以將 DHCP Server 的 ID 放在這裡或是在 AWX 的 Extra Variables 中傳入
+    # 您可以將 DHCP Server 的 ID 放在這裡或是在 AWX Templates 的 Variables 中傳入 >>server_id: "4"
     dhcp_server_id: "{{ server_id | default('3') }}"
 
   tasks:
@@ -20,21 +20,22 @@
         status_code: 200
       register: result
 
-    - name: 顯示查詢結果標題
+    - name: 以 FortiGate CLI 格式顯示 DHCP 保留位址設定
       ansible.builtin.debug:
-        msg: "成功獲取 DHCP Server ID {{ dhcp_server_id }} 的保留位址列表，內容如下："
+        # 使用 Jinja2 模板來動態產生 CLI 格式的輸出
+        msg: |
+          config system dhcp server
+              edit {{ dhcp_server_id }}
+                  config reserved-address
+          {% for item in result.json.results %}
+                      edit {{ item.id }}
+                          set ip {{ item.ip }}
+                          set mac {{ item.mac }}
+                          set description "{{ item.description | default('', true) }}"
+                      next
+          {% endfor %}
+                  end
+              next
+          end
       # 只有在成功獲取到結果時才顯示
       when: result.json.results is defined and result.json.results | length > 0
-
-    - name: 條列顯示每一個保留位址的詳細資訊
-      ansible.builtin.debug:
-        msg:
-          - "  ID: {{ item.id }}"
-          - "  IP 位址: {{ item.ip }}"
-          - "  MAC 位址: {{ item.mac }}"
-          - "  描述: {{ item.description | default('N/A', true) }}"
-      # 使用 loop 遍歷 API 回傳的 results 列表
-      loop: "{{ result.json.results }}"
-      loop_control:
-        label: "{{ item.ip }}" # 讓 AWX 輸出中每一項的標題更清晰
-      when: result.json.results is defined
