@@ -1,26 +1,37 @@
 ---
-- name: Create FortiGate Firewall Address
+- name: Create FortiGate Firewall Address using URI Module
   hosts: localhost
-  gather_facts: no
-  vars:
-    fortigate_protocol: "https"
-    fortigate_api_url: "{{ fortigate_protocol }}://{{ lookup('env', 'FORTIGATE_HOST') }}/api/v2/cmdb/firewall/address"
+  connection: local
+  gather_facts: false
+
   tasks:
-    - name: Create a firewall address
-      uri:
-        url: "{{ fortigate_api_url }}"
+    - name: Create a firewall address object via REST API
+      ansible.builtin.uri:
+        # 組合 API 的完整 URL
+        url: "https://{{ lookup('env', 'FORTIGATE_HOST') }}/api/v2/cmdb/firewall/address"
         method: POST
         headers:
+          # 從您自訂的 Credential 中讀取 API Token
           Authorization: "Bearer {{ lookup('env', 'FORTIGATE_API_TOKEN') }}"
-          Content-Type: "application/json"
-        body: 
-          json:
-            name: "my_test_address"
-            type: "ipmask"
-            subnet: "10.10.10.0 255.255.255.0"
+        
+        # --- 關鍵部分：要傳送的 JSON 內容 ---
+        # 這裡的 name 和 subnet 會從 AWX Job Template 的 Extra Variables 讀取
+        body:
+          name: "{{ address_name | default('AWX_URI_Test_Address') }}"
+          subnet: "{{ address_subnet | default('5.5.5.5 255.255.255.255') }}"
+          type: "ipmask"
+          comment: "Managed by Ansible AWX"
+        
+        # 指定 body 的格式是 json，uri 模組會自動處理轉換
         body_format: json
+        
+        # 忽略 SSL 憑證驗證，在測試環境中很方便
         validate_certs: false
+        
+        # 預期 API 成功時會回傳 200 (OK)
+        status_code: 200
       register: result
 
-    - debug:
+    - name: Display API response for debugging
+      ansible.builtin.debug:
         var: result.json
