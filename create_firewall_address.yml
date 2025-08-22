@@ -1,9 +1,7 @@
 ---
 - name: Create FortiGate Address Object (Official Example)
-  hosts: all
-  connection: httpapi
-  collections:
-    - fortinet.fortios
+  hosts: localhost
+  connection: local
   gather_facts: false
 
   tasks:
