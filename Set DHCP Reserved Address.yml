@@ -1,0 +1,77 @@
+---
+- name: Set FortiGate DHCP Reserved Address
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # --- 請在 AWX Job Template 的 Extra Variables 中傳入以下參數 ---
+    # target_ip: "192.168.250.103"
+    # target_mac: "00:25:aa:aa:01:03"
+    # target_description: "test103_PC_updated"
+    dhcp_server_id: "{{ server_id | default('3') }}"
+
+  tasks:
+    - name: 1. 獲取所有現有的 DHCP 保留位址
+      ansible.builtin.uri:
+        url: "https://{{ lookup('env', 'FORTIGATE_HOST') }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ lookup('env', 'FORTIGATE_API_TOKEN') }}"
+        validate_certs: false
+        status_code: 200
+      register: existing_reservations
+
+    - name: 2. 檢查點：檢查 MAC 位址是否與其他 IP 衝突
+      ansible.builtin.fail:
+        msg: |
+          錯誤：執行停止。MAC 位址 '{{ target_mac }}' 已被另一個物件使用。
+          衝突物件 IP: {{ item.ip }}
+          衝突物件描述: {{ item.description | default('N/A', true) }}
+          請更換 MAC 位址後再試。
+      # 條件：當找到一個物件，它的 MAC 與目標 MAC 相同，但 IP 與目標 IP 不同時，就觸發失敗。
+      when: item.mac == target_mac and item.ip != target_ip
+      loop: "{{ existing_reservations.json.results }}"
+      loop_control:
+        label: "檢查 {{ item.ip }} 的 MAC 位址"
+
+    - name: 3. 根據目標 IP 尋找要更新的物件 ID
+      ansible.builtin.set_fact:
+        target_object_id: "{{ item.id }}"
+      when: item.ip == target_ip
+      loop: "{{ existing_reservations.json.results }}"
+      loop_control:
+        label: "尋找 IP {{ item.ip }}"
+
+    - name: 4. 如果找到物件，則執行更新
+      ansible.builtin.uri:
+        # API 路徑需要包含物件的 ID
+        url: "https://{{ lookup('env', 'FORTIGATE_HOST') }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address/{{ target_object_id }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ lookup('env', 'FORTIGATE_API_TOKEN') }}"
+        body:
+          # 在 body 中提供要更新的欄位
+          mac: "{{ target_mac }}"
+          description: "{{ target_description }}"
+        body_format: json
+        validate_certs: false
+        status_code: 200
+      # 條件：只有在 target_object_id 變數被成功設定時才執行
+      when: target_object_id is defined
+      register: update_result
+
+    - name: 5. 顯示更新成功訊息
+      ansible.builtin.debug:
+        msg:
+          - "成功更新 DHCP 保留位址！"
+          - "  目標 IP: {{ target_ip }}"
+          - "  更新後 MAC: {{ target_mac }}"
+          - "  更新後描述: {{ target_description }}"
+      when: update_result is defined and update_result.changed
+
+    - name: 6. 如果未找到物件，則顯示提示訊息
+      ansible.builtin.debug:
+        msg: "未找到 IP 位址為 '{{ target_ip }}' 的 DHCP 保留位址設定，未執行任何操作。"
+      # 條件：只有在 target_object_id 變數未被設定時才執行
+      when: target_object_id is not defined
