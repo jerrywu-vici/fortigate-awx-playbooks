@@ -39,23 +39,20 @@
     # --- 第二個檢查點：尋找目標 IP ---
     - name: 3. 尋找要更新的目標物件
       ansible.builtin.set_fact:
-        target_object: "{{ item }}"
-      loop: "{{ existing_reservations.json.results }}"
-      when: item.ip == target_ip
-      # 註冊迴圈結果，以便後續判斷是否找到物件
-      register: target_find_loop_result
+        # 使用 selectattr 過濾器建立一個只包含目標 IP 物件的列表
+        target_object_list: "{{ existing_reservations.json.results | selectattr('ip', 'equalto', target_ip) | list }}"
 
     - name: 4. 檢查點：確認目標 IP 是否存在
       ansible.builtin.fail:
         msg: "錯誤：在 DHCP Server {{ dhcp_server_id }} 中找不到目標 IP 位址 '{{ target_ip }}'。請確認 IP 是否正確。"
-      # 條件：檢查上一個任務的迴圈結果，如果 'changed' 的項目數為 0，代表 set_fact 從未被執行
-      when: target_find_loop_result.changed | default(false) | bool == false
+      # 條件：如果上一步建立的列表長度為 0，代表沒找到任何物件
+      when: target_object_list | length == 0
 
     # --- 執行更新 ---
     - name: 5. 如果找到物件且無衝突，則執行更新
       ansible.builtin.uri:
-        # API 路徑需要包含物件的 ID
-        url: "https://{{ lookup('env', 'FORTIGATE_HOST') }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address/{{ target_object.id }}"
+        # API 路徑需要包含物件的 ID，我們從列表的第一個元素中獲取
+        url: "https://{{ lookup('env', 'FORTIGATE_HOST') }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address/{{ target_object_list[0].id }}"
         method: PUT
         headers:
           Authorization: "Bearer {{ lookup('env', 'FORTIGATE_API_TOKEN') }}"
