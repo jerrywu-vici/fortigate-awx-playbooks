@@ -72,4 +72,5 @@
           - "  目標 IP: {{ target_ip }}"
           - "  更新後 MAC: {{ target_mac }}"
           - "  更新後描述: {{ target_description }}"
-      when: update_result is defined and update_result.changed
+      # 關鍵修正：直接檢查 API 回傳的 revision_changed 狀態
+      when: update_result.json is defined and update_result.json.revision_changed | default(false)
