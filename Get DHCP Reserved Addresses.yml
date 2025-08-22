@@ -1,0 +1,40 @@
+---
+- name: Get FortiGate DHCP Reserved Addresses
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # 您可以將 DHCP Server 的 ID 放在這裡或是在 AWX 的 Extra Variables 中傳入
+    dhcp_server_id: "{{ server_id | default('3') }}"
+
+  tasks:
+    - name: 獲取指定 DHCP Server 的保留位址列表
+      ansible.builtin.uri:
+        # API 路徑指向 system.dhcp server 下的 reserved-address
+        url: "https://{{ lookup('env', 'FORTIGATE_HOST') }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ lookup('env', 'FORTIGATE_API_TOKEN') }}"
+        validate_certs: false
+        status_code: 200
+      register: result
+
+    - name: 顯示查詢結果標題
+      ansible.builtin.debug:
+        msg: "成功獲取 DHCP Server ID {{ dhcp_server_id }} 的保留位址列表，內容如下："
+      # 只有在成功獲取到結果時才顯示
+      when: result.json.results is defined and result.json.results | length > 0
+
+    - name: 條列顯示每一個保留位址的詳細資訊
+      ansible.builtin.debug:
+        msg:
+          - "  ID: {{ item.id }}"
+          - "  IP 位址: {{ item.ip }}"
+          - "  MAC 位址: {{ item.mac }}"
+          - "  描述: {{ item.description | default('N/A', true) }}"
+      # 使用 loop 遍歷 API 回傳的 results 列表
+      loop: "{{ result.json.results }}"
+      loop_control:
+        label: "{{ item.ip }}" # 讓 AWX 輸出中每一項的標題更清晰
+      when: result.json.results is defined
