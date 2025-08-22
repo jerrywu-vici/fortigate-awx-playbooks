@@ -22,15 +22,15 @@
         status_code: 200
       register: existing_reservations
 
-    - name: 2. 檢查點：檢查 MAC 位址是否與其他 IP 衝突
+    - name: 2. 檢查點：檢查 MAC 位址是否與其他設定衝突
       ansible.builtin.fail:
         msg: |
-          錯誤：執行停止。MAC 位址 '{{ target_mac }}' 已被另一個物件使用。
+          錯誤：執行停止。您提供的 MAC 位址 '{{ target_mac }}' 已被現有設定中的另一個物件使用。
           衝突物件 IP: {{ item.ip }}
           衝突物件描述: {{ item.description | default('N/A', true) }}
           請更換 MAC 位址後再試。
-      # 條件：當找到一個物件，它的 MAC 與目標 MAC 相同，但 IP 與目標 IP 不同時，就觸發失敗。
-      when: item.mac == target_mac and item.ip != target_ip
+      # 條件：當找到一個物件，它的 MAC 與目標 MAC 相同(忽略大小寫)，但 IP 與目標 IP 不同時，就觸發失敗。
+      when: item.mac.lower() == target_mac.lower() and item.ip != target_ip
       loop: "{{ existing_reservations.json.results }}"
       loop_control:
         label: "檢查 {{ item.ip }} 的 MAC 位址"
