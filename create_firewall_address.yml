@@ -1,15 +1,19 @@
+---
 - name: Create FortiGate Firewall Address
   hosts: localhost
   gather_facts: no
+  vars:
+    fortigate_protocol: "https"
+    fortigate_api_url: "{{ fortigate_protocol }}://{{ lookup('env', 'FORTIGATE_HOST') }}/api/v2/cmdb/firewall/address"
   tasks:
     - name: Create a firewall address
       uri:
-        url: "{{ lookup('env', 'FORTIGATE_HOST') }}/api/v2/cmdb/firewall/address"
+        url: "{{ fortigate_api_url }}"
         method: POST
         headers:
           Authorization: "Bearer {{ lookup('env', 'FORTIGATE_API_TOKEN') }}"
           Content-Type: "application/json"
-        body: 
+        body:
           name: "my_test_address"
           subnet: "10.10.10.0 255.255.255.0"
           type: "subnet"
