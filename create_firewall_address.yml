@@ -1,9 +1,9 @@
 ---
 - name: Create or Update FortiGate Firewall Address
-  # 永遠在 AWX 執行節點上運行
+  # 任務的執行地點是 AWX 節點 (localhost)
   hosts: localhost
   
-  # 使用 httpapi 連線到遠端的 FortiGate
+  # 明確指定使用 httpapi 連線外掛程式
   connection: httpapi
   
   collections:
@@ -11,23 +11,25 @@
   
   gather_facts: false
 
-  # --- 正確的變數定義 ---
+  # --- 定義 httpapi 連線外掛程式所需的所有變數 ---
   vars:
-    # 關鍵修正: 告訴 httpapi 外掛程式要去連線的目標主機
+    # 關鍵：告訴 httpapi 外掛程式要去連線的遠端目標主機
     ansible_host: "{{ lookup('env', 'FORTIGATE_HOST') }}"
     
-    # httpapi 外掛程式需要的其他連線變數
+    # httpapi 外掛程式需要的其他連線參數
     ansible_httpapi_use_ssl: yes
-    ansible_httpapi_validate_certs: no
+    ansible_httpapi_validate_certs: no # 在生產環境中建議設為 yes
     ansible_httpapi_access_token: "{{ lookup('env', 'FORTIGATE_API_TOKEN') }}"
 
   tasks:
     - name: Ensure firewall address object exists
       fortinet.fortios.fortios_firewall_address:
-        # 任務本身保持乾淨，所有連線細節都在上面的 vars 區塊處理
+        # vdom: "root" # 如果您有 VDOM，請取消註解並指定
+
+        # 任務本身保持乾淨，因為所有連線資訊都已在 vars 中定義
         state: "present"
         firewall_address:
-          name: "{{ address_name | default('AWX_Final_Correct_Address') }}"
-          subnet: "{{ address_subnet | default('3.3.3.3/32') }}"
+          name: "{{ address_name | default('AWX_Test_Address_Final') }}"
+          subnet: "{{ address_subnet | default('4.4.4.4/32') }}"
           type: "ipmask"
-          comment: "Managed by Ansible AWX - The Right Way"
+          comment: "Managed by Ansible AWX"
