@@ -27,8 +27,8 @@
       ansible.builtin.set_fact:
         # 從列表中篩選出 IP 符合目標的物件，如果找不到則為空物件 {}
         target_object: "{{ (existing_reservations.json.results | selectattr('ip', 'equalto', target_ip) | list | first) | default({}) }}"
-        # 從列表中篩選出 MAC 符合目標的物件（忽略大小寫），如果找不到則為空物件 {}
-        conflicting_object: "{{ (existing_reservations.json.results | selectattr('mac', 'ignorecase', target_mac) | list | first) | default({}) }}"
+        # 關鍵修正：使用 'where' 過濾器來實現忽略大小寫的比較
+        conflicting_object: "{{ (existing_reservations.json.results | where('mac is defined and mac|lower == target_mac|lower') | list | first) | default({}) }}"
 
     # --- 檢查點 ---
     - name: 3. 檢查點：確認目標 IP 是否存在
