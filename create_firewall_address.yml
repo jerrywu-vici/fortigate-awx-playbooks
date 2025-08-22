@@ -13,10 +13,11 @@
         headers:
           Authorization: "Bearer {{ lookup('env', 'FORTIGATE_API_TOKEN') }}"
           Content-Type: "application/json"
-        body:
-          name: "my_test_address"
-          subnet: "10.10.10.0 255.255.255.0"
-          type: "subnet"
+        body: 
+          json:
+            name: "my_test_address"
+            type: "ipmask"
+            subnet: "10.10.10.0 255.255.255.0"
         body_format: json
         validate_certs: false
       register: result
