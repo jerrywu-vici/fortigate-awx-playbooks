@@ -1,5 +1,5 @@
 ---
-- name: FortiGate Create Firewall Address using URI Module
+- name: Create or Update FortiGate Firewall Address using URI Module
   hosts: localhost
   connection: local
   gather_facts: false
@@ -45,8 +45,13 @@
       when: check_result.status == 404
       register: create_result
 
-    - name: 顯示建立結果
+    - name: 條列顯示成功建立的物件內容
       ansible.builtin.debug:
-        msg: "成功建立防火牆位址物件: {{ create_result.json }}"
+        msg:
+          - "成功建立防火牆位址物件，詳細內容如下："
+          - "  名稱 (Name): {{ create_result.json.results[0].name }}"
+          - "  子網路 (Subnet): {{ create_result.json.results[0].subnet }}"
+          - "  類型 (Type): {{ create_result.json.results[0].type }}"
+          - "  註解 (Comment): {{ create_result.json.results[0].comment | default('N/A', true) }}"
       # 只有在 "建立" 任務實際執行並產生變更時，才顯示此訊息
       when: create_result is changed
