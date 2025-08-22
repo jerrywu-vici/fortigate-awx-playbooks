@@ -1,20 +1,23 @@
 ---
-- name: Create FortiGate Address Object (Official Example)
+- name: Create or Update FortiGate Firewall Address
   hosts: localhost
   connection: local
   gather_facts: false
 
   tasks:
-    - name: Create new firewall address for 'webserver1'
-      fortios_firewall_address:
-        # vdom 參數非常重要，即使是預設的 root 也請加上
-        vdom: "root"
+    - name: Ensure firewall address object exists
+      fortinet.fortios.fortios_firewall_address:
+        # vdom: "root" # 如果您有多個 VDOM，請取消註解並指定 VDOM
         
-        # state: "present" 確保這個物件存在
-        state: "present"
-        
-        # address 字典定義了物件的屬性
-        address:
-          name: "webserver1-official-example"
-          subnet: "192.168.1.100/32"
-          comment: "Created via official AWX example"
+        # --- 連線資訊 (自動從 Credential 讀取) ---
+        host: "{{ lookup('env', 'FORTIGATE_HOST') }}"
+        access_token: "{{ lookup('env', 'FORTIGATE_API_TOKEN') }}"
+        validate_certs: false # 開發時設為 false，生產環境建議設為 true
+
+        # --- 位址物件定義 ---
+        state: "present"  # present 表示確保物件存在 (不存在則建立，存在則更新)
+        firewall_address:
+          name: "{{ address_name | default('AWX_Default_Test_Address') }}" # 位址物件名稱
+          subnet: "{{ address_subnet | default('1.1.1.1/32') }}"           # 位址物件的 IP/Subnet
+          type: "ipmask"                                                   # 類型為 IP/Mask
+          comment: "Managed by Ansible AWX"                                # 註解
