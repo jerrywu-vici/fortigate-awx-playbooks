@@ -8,7 +8,7 @@
 # 3. 支持新增和更新既有配置
 # 
 # 作者：VICI Network Team
-# 版本：v1.1 - 修正selector名稱
+# 版本：v1.2 - 修正參數類型問題
 # =============================================================================
 
 - name: FortiGate DHCP Reserved Address 智能管理
@@ -28,8 +28,8 @@
     target_mac: "{{ mac_param }}"                  # 目標MAC地址
     target_description: "{{ desc_param }}"        # 目標描述
     
-    # FortiGate系統參數
-    dhcp_server_id: "{{ server_id | default(3) }}" # DHCP Server ID（默認為3）
+    # FortiGate系統參數（確保為整數類型）
+    dhcp_server_id: "{{ server_id | default(3) | int }}" # DHCP Server ID（確保為整數）
     vdom_name: "{{ fortigate_vdom }}"              # VDOM名稱（來自credential）
     api_token: "{{ fortigate_access_token }}"     # API Token（來自credential）
     
@@ -47,7 +47,7 @@
           🎯 目標IP地址: {{ target_ip }}
           🔗 目標MAC地址: {{ target_mac }}
           📝 目標描述: {{ target_description }}
-          🏷️  DHCP Server ID: {{ dhcp_server_id }}
+          🏷️  DHCP Server ID: {{ dhcp_server_id }} (類型: {{ dhcp_server_id | type_debug }})
           🌐 VDOM: {{ vdom_name }}
           ==========================================
 
@@ -60,9 +60,9 @@
         vdom: "{{ vdom_name }}"
         access_token: "{{ api_token }}"
         selectors:
-          - selector: system.dhcp_server           # ✅ 修正：使用正確的selector名稱
+          - selector: system.dhcp_server           # 使用正確的selector名稱
             params:
-              id: "{{ dhcp_server_id }}"           # 指定server ID
+              id: "{{ dhcp_server_id | int }}"     # ✅ 確保ID為整數類型
       register: dhcp_facts
       tags:
         - get_config
@@ -71,24 +71,30 @@
     # 步驟3：解析當前reserved-address配置
     # =======================================================================
     
-    - name: "📊 解析DHCP配置結果"
+    - name: "📊 顯示原始DHCP配置查詢結果"
       debug:
         msg: |
           🔍 DHCP配置查詢結果：
           - 查詢成功: {{ dhcp_facts is succeeded }}
           - 結果數量: {{ dhcp_facts.meta.results | length }}
+          - 原始結果: {{ dhcp_facts.meta.results }}
       tags:
         - parse_config
 
     - name: "📊 解析當前reserved-address列表"
       set_fact:
-        # 提取reserved_address陣列，如果不存在則設為空陣列
-        current_reserved_addresses: "{{ dhcp_facts.meta.results[0]['reserved-address'] | default([]) }}"
+        # 嘗試不同的屬性名稱來提取reserved_address
+        current_reserved_addresses: >-
+          {{
+            dhcp_facts.meta.results[0]['reserved-address'] | default(
+              dhcp_facts.meta.results[0]['reserved_address'] | default([])
+            )
+          }}
       when: dhcp_facts.meta.results | length > 0
       tags:
         - parse_config
 
-    - name: "📊 設定空的reserved-address列表"
+    - name: "📊 設定空的reserved-address列表（無配置時）"
       set_fact:
         current_reserved_addresses: []
       when: dhcp_facts.meta.results | length == 0
@@ -215,12 +221,12 @@
             (existing_reservation_by_ip.description | default('') != target_description)
           }}
         
-        # 決定reservation ID：
+        # 決定reservation ID（確保為整數）：
         # - 如果有既有IP配置，使用既有ID
         # - 如果沒有，使用當前最大ID+1（如果沒有任何配置則從1開始）
         reservation_id: >-
           {%- if existing_reservation_by_ip | length > 0 -%}
-            {{ existing_reservation_by_ip.id }}
+            {{ existing_reservation_by_ip.id | int }}
           {%- else -%}
             {{ ((current_reserved_addresses | map(attribute='id') | map('int') | list | max) + 1) if current_reserved_addresses else 1 }}
           {%- endif -%}
@@ -242,7 +248,7 @@
           📋 操作執行計畫
           ==========================================
           🎯 操作類型: {{ operation_type }}
-          🏷️  Reservation ID: {{ reservation_id }}
+          🏷️  Reservation ID: {{ reservation_id }} (類型: {{ reservation_id | type_debug }})
           🔄 需要更新: {{ '是' if needs_update else '否' }}
           
           {% if needs_update %}
@@ -285,13 +291,13 @@
         vdom: "{{ vdom_name }}"
         access_token: "{{ api_token }}"
         system_dhcp_server:
-          id: "{{ dhcp_server_id }}"           # DHCP Server ID
-          reserved_address:                    # ✅ 修正：使用正確的屬性名稱
-            - id: "{{ reservation_id }}"       # Reserved Address ID
-              ip: "{{ target_ip }}"            # IP地址
-              mac: "{{ target_mac }}"          # MAC地址
+          id: "{{ dhcp_server_id | int }}"      # ✅ 確保DHCP Server ID為整數
+          reserved_address:                     # 使用正確的屬性名稱
+            - id: "{{ reservation_id | int }}"  # ✅ 確保Reserved Address ID為整數
+              ip: "{{ target_ip }}"             # IP地址
+              mac: "{{ target_mac }}"           # MAC地址
               description: "{{ target_description }}"  # 描述
-        state: present                         # 整個DHCP server狀態
+        state: present                          # 整個DHCP server狀態
       register: update_result
       when: needs_update
       tags:
@@ -330,10 +336,14 @@
           📋 錯誤詳情：
           {{ update_result.msg | default('未知錯誤') }}
           
+          🔍 詳細錯誤信息：
+          {{ update_result }}
+          
           💡 請檢查：
           1. FortiGate API權限
-          2. DHCP Server ID是否存在
+          2. DHCP Server ID {{ dhcp_server_id }} 是否存在
           3. 網路連接狀態
+          4. VDOM權限設定
       when: needs_update and update_result is failed
       tags:
         - show_result
