@@ -65,12 +65,18 @@
         status_code: 200
       register: update_result
 
-    - name: 6. 顯示更新成功訊息
-      ansible.builtin.debug:
-        msg:
-          - "成功更新 DHCP 保留位址！"
-          - "  目標 IP: {{ target_ip }}"
-          - "  更新後 MAC: {{ target_mac }}"
-          - "  更新後描述: {{ target_description }}"
-      # 關鍵修正：直接檢查 API 回傳的 revision_changed 狀態
+    # --- 關鍵修正：先將成功訊息存為變數 ---
+    - name: 6. 準備成功訊息
+      ansible.builtin.set_fact:
+        success_message: |
+          成功更新 DHCP 保留位址！
+            目標 IP: {{ target_ip }}
+            更新後 MAC: {{ target_mac }}
+            更新後描述: {{ target_description }}
       when: update_result.json is defined and update_result.json.revision_changed | default(false)
+
+    - name: 7. 顯示更新成功訊息
+      ansible.builtin.debug:
+        var: success_message
+      # 條件：只有在 success_message 變數被成功建立時才執行
+      when: success_message is defined
