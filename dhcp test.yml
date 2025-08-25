@@ -1,108 +1,329 @@
 ---
-- name: FortiGate DHCP Reserved Address Management
-  hosts: fortigate
+# =============================================================================
+# FortiGate DHCP Reserved Address 智能管理 Playbook
+# 
+# 功能說明：
+# 1. 根據提供的IP、MAC、Description參數智能更新DHCP reserved-address
+# 2. 自動檢測MAC地址衝突，避免重複分配
+# 3. 支持新增和更新既有配置
+# 
+# 作者：VICI Network Team
+# 版本：v1.0
+# =============================================================================
+
+- name: FortiGate DHCP Reserved Address 智能管理
+  hosts: all
   connection: httpapi
+  gather_facts: false
   collections:
     - fortinet.fortios
+  
   vars:
-    # 用戶輸入的參數
-    target_ip: "{{ ip_param }}"           # 來自AWX extra_vars
-    target_mac: "{{ mac_param }}"         # 來自AWX extra_vars  
-    target_description: "{{ desc_param }}" # 來自AWX extra_vars
-    dhcp_server_id: 3                     # DHCP server ID
+    # =======================================================================
+    # 變數定義區
+    # =======================================================================
+    
+    # 用戶輸入參數（從AWX Survey或Extra Variables獲取）
+    target_ip: "{{ ip_param }}"                    # 目標IP地址
+    target_mac: "{{ mac_param }}"                  # 目標MAC地址
+    target_description: "{{ desc_param }}"        # 目標描述
+    
+    # FortiGate系統參數
+    dhcp_server_id: "{{ server_id | default(3) }}" # DHCP Server ID（默認為3）
+    vdom_name: "{{ fortigate_vdom }}"              # VDOM名稱（來自credential）
+    api_token: "{{ fortigate_access_token }}"     # API Token（來自credential）
     
   tasks:
-    - name: Get current DHCP server configuration
-      fortinet.fortios.fortios_system_dhcp_server:
-        vdom: "{{ vdom | default('root') }}"
-        access_token: "{{ access_token }}"
-        system_dhcp_server:
-          id: "{{ dhcp_server_id }}"
-        state: present
-      register: current_dhcp_config
-      
-    - name: Extract current reserved addresses
+    # =======================================================================
+    # 步驟1：輸入參數驗證和顯示
+    # =======================================================================
+    
+    - name: "📋 顯示輸入參數"
+      debug:
+        msg: |
+          ==========================================
+          📋 FortiGate DHCP Reserved Address 管理
+          ==========================================
+          🎯 目標IP地址: {{ target_ip }}
+          🔗 目標MAC地址: {{ target_mac }}
+          📝 目標描述: {{ target_description }}
+          🏷️  DHCP Server ID: {{ dhcp_server_id }}
+          🌐 VDOM: {{ vdom_name }}
+          ==========================================
+
+    # =======================================================================
+    # 步驟2：獲取FortiGate當前DHCP配置
+    # =======================================================================
+    
+    - name: "🔍 獲取FortiGate當前DHCP Server配置"
+      fortinet.fortios.fortios_configuration_fact:
+        vdom: "{{ vdom_name }}"
+        access_token: "{{ api_token }}"
+        selectors:
+          - selector: system_dhcp_server        # 選擇DHCP server配置
+            params:
+              id: "{{ dhcp_server_id }}"       # 指定server ID
+      register: dhcp_facts
+      tags:
+        - get_config
+
+    # =======================================================================
+    # 步驟3：解析當前reserved-address配置
+    # =======================================================================
+    
+    - name: "📊 解析當前reserved-address列表"
       set_fact:
-        current_reserved_addresses: "{{ current_dhcp_config.meta.results.reserved_address | default([]) }}"
-        
-    - name: Find existing reservation by IP
+        # 提取reserved_address陣列，如果不存在則設為空陣列
+        current_reserved_addresses: "{{ dhcp_facts.meta.results[0].reserved_address | default([]) }}"
+      tags:
+        - parse_config
+
+    - name: "🔍 顯示當前所有reserved-address配置"
+      debug:
+        msg: |
+          當前共有 {{ current_reserved_addresses | length }} 個reserved-address配置：
+          {% for addr in current_reserved_addresses %}
+          - ID: {{ addr.id }}, IP: {{ addr.ip }}, MAC: {{ addr.mac }}, 描述: {{ addr.description | default('無') }}
+          {% endfor %}
+      tags:
+        - parse_config
+
+    # =======================================================================
+    # 步驟4：查找既有配置（按IP和MAC分別查找）
+    # =======================================================================
+    
+    - name: "🔍 查找既有IP配置"
       set_fact:
-        existing_reservation_by_ip: "{{ current_reserved_addresses | selectattr('ip', 'equalto', target_ip) | first | default({}) }}"
-        
-    - name: Find existing reservation by MAC
+        # 查找是否有相同IP的配置
+        existing_reservation_by_ip: "{{ current_reserved_addresses | selectattr('ip', 'equalto', target_ip) | list | first | default({}) }}"
+      tags:
+        - find_existing
+
+    - name: "🔍 查找既有MAC配置"
       set_fact:
-        existing_reservation_by_mac: "{{ current_reserved_addresses | selectattr('mac', 'equalto', target_mac) | first | default({}) }}"
-        
-    - name: Check for MAC conflict
+        # 查找是否有相同MAC的配置
+        existing_reservation_by_mac: "{{ current_reserved_addresses | selectattr('mac', 'equalto', target_mac) | list | first | default({}) }}"
+      tags:
+        - find_existing
+
+    # =======================================================================
+    # 步驟5：MAC衝突檢測邏輯
+    # =======================================================================
+    
+    - name: "⚠️  執行MAC衝突檢測"
       set_fact:
+        # MAC衝突條件：
+        # 1. 找到既有MAC配置 且
+        # 2. 該MAC配置的IP與目標IP不同
         mac_conflict: >-
           {{
-            existing_reservation_by_mac != {} and 
-            existing_reservation_by_mac.ip != target_ip
+            (existing_reservation_by_mac | length > 0) and 
+            (existing_reservation_by_mac.ip != target_ip)
           }}
-          
-    - name: Display conflict information
+      tags:
+        - conflict_check
+
+    - name: "📋 顯示衝突檢測結果"
       debug:
         msg: |
-          Target IP: {{ target_ip }}
-          Target MAC: {{ target_mac }}
-          Target Description: {{ target_description }}
-          Existing reservation by IP: {{ existing_reservation_by_ip }}
-          Existing reservation by MAC: {{ existing_reservation_by_mac }}
-          MAC Conflict detected: {{ mac_conflict }}
+          ==========================================
+          🔍 衝突檢測分析結果
+          ==========================================
+          {% if existing_reservation_by_ip | length > 0 %}
+          ✅ 找到既有IP配置:
+             - ID: {{ existing_reservation_by_ip.id }}
+             - IP: {{ existing_reservation_by_ip.ip }}
+             - MAC: {{ existing_reservation_by_ip.mac }}
+             - 描述: {{ existing_reservation_by_ip.description | default('無') }}
+          {% else %}
+          ℹ️  未找到既有IP配置（將創建新配置）
+          {% endif %}
           
-    - name: Stop execution if MAC conflict detected
+          {% if existing_reservation_by_mac | length > 0 %}
+          ⚠️  找到既有MAC配置:
+             - ID: {{ existing_reservation_by_mac.id }}
+             - IP: {{ existing_reservation_by_mac.ip }}
+             - MAC: {{ existing_reservation_by_mac.mac }}
+             - 描述: {{ existing_reservation_by_mac.description | default('無') }}
+          {% else %}
+          ℹ️  未找到既有MAC配置
+          {% endif %}
+          
+          🚫 MAC衝突狀態: {{ '是' if mac_conflict else '否' }}
+          ==========================================
+      tags:
+        - conflict_check
+
+    # =======================================================================
+    # 步驟6：MAC衝突時停止執行
+    # =======================================================================
+    
+    - name: "🚫 MAC衝突 - 停止執行"
       fail:
         msg: |
-          MAC conflict detected! 
-          MAC {{ target_mac }} is already assigned to IP {{ existing_reservation_by_mac.ip }}
-          Cannot assign it to IP {{ target_ip }}
+          ❌❌❌ MAC衝突檢測失敗！❌❌❌
+          
+          🔴 衝突詳情：
+          - 目標MAC: {{ target_mac }}
+          - 目標IP: {{ target_ip }}
+          - 衝突原因: MAC {{ target_mac }} 已被分配給 IP {{ existing_reservation_by_mac.ip }}
+          
+          💡 解決方案：
+          1. 使用不同的MAC地址
+          2. 或者確認是否要更新既有IP {{ existing_reservation_by_mac.ip }} 的配置
+          
+          ⚠️  為避免網路衝突，操作已終止！
       when: mac_conflict
-      
-    - name: Determine operation type
+      tags:
+        - conflict_check
+
+    # =======================================================================
+    # 步驟7：決定操作類型（新增或更新）
+    # =======================================================================
+    
+    - name: "🎯 決定操作類型和參數"
       set_fact:
-        operation_type: >-
-          {%- if existing_reservation_by_ip != {} -%}
-            update
-          {%- else -%}
-            create
-          {%- endif -%}
+        # 判斷是否需要更新：
+        # 1. 沒有既有IP配置（需要新增）或
+        # 2. MAC地址不同 或
+        # 3. 描述不同
+        needs_update: >-
+          {{
+            (existing_reservation_by_ip | length == 0) or
+            (existing_reservation_by_ip.mac != target_mac) or
+            (existing_reservation_by_ip.description | default('') != target_description)
+          }}
+        
+        # 決定reservation ID：
+        # - 如果有既有IP配置，使用既有ID
+        # - 如果沒有，使用當前最大ID+1
         reservation_id: >-
-          {%- if existing_reservation_by_ip != {} -%}
+          {%- if existing_reservation_by_ip | length > 0 -%}
             {{ existing_reservation_by_ip.id }}
           {%- else -%}
-            {{ (current_reserved_addresses | map(attribute='id') | map('int') | max | default(0)) + 1 }}
+            {{ ((current_reserved_addresses | map(attribute='id') | map('int') | list | max) + 1) if current_reserved_addresses else 1 }}
           {%- endif -%}
-          
-    - name: Display operation details
+        
+        # 決定操作類型
+        operation_type: >-
+          {%- if existing_reservation_by_ip | length > 0 -%}
+            更新既有配置
+          {%- else -%}
+            創建新配置
+          {%- endif -%}
+      tags:
+        - determine_action
+
+    - name: "📋 顯示操作計畫"
       debug:
         msg: |
-          Operation: {{ operation_type }}
-          Reservation ID: {{ reservation_id }}
+          ==========================================
+          📋 操作執行計畫
+          ==========================================
+          🎯 操作類型: {{ operation_type }}
+          🏷️  Reservation ID: {{ reservation_id }}
+          🔄 需要更新: {{ '是' if needs_update else '否' }}
           
-    - name: Create/Update reserved address
-      fortinet.fortios.fortios_system_dhcp_server:
-        vdom: "{{ vdom | default('root') }}"
-        access_token: "{{ access_token }}"
-        system_dhcp_server:
-          id: "{{ dhcp_server_id }}"
-          reserved_address:
-            - id: "{{ reservation_id }}"
-              ip: "{{ target_ip }}"
-              mac: "{{ target_mac }}"
-              description: "{{ target_description }}"
-        state: present
-      register: update_result
-      
-    - name: Display result
-      debug:
-        msg: |
-          {% if operation_type == 'update' %}
-          Successfully updated reserved address:
+          {% if needs_update %}
+          📝 將要執行的更新：
+          - IP地址: {{ target_ip }}
+          - MAC地址: {{ target_mac }}
+          - 描述: {{ target_description }}
           {% else %}
-          Successfully created reserved address:
+          ℹ️  配置已符合目標狀態，無需更新
           {% endif %}
-          - ID: {{ reservation_id }}
+          ==========================================
+      tags:
+        - determine_action
+
+    # =======================================================================
+    # 步驟8：跳過不必要的更新
+    # =======================================================================
+    
+    - name: "✅ 配置已是最新狀態"
+      debug:
+        msg: |
+          ✅✅✅ 配置檢查完成 ✅✅✅
+          
+          🎉 當前配置已符合目標狀態：
           - IP: {{ target_ip }}
           - MAC: {{ target_mac }}
-          - Description: {{ target_description }}
+          - 描述: {{ target_description }}
+          
+          💡 無需執行任何變更操作！
+      when: not needs_update
+      tags:
+        - skip_update
+
+    # =======================================================================
+    # 步驟9：執行DHCP配置更新
+    # =======================================================================
+    
+    - name: "🔧 {{ operation_type }} - 執行DHCP配置更新"
+      fortinet.fortios.fortios_system_dhcp_server:
+        vdom: "{{ vdom_name }}"
+        access_token: "{{ api_token }}"
+        system_dhcp_server:
+          id: "{{ dhcp_server_id }}"           # DHCP Server ID
+          reserved_address:
+            - id: "{{ reservation_id }}"       # Reserved Address ID
+              ip: "{{ target_ip }}"            # IP地址
+              mac: "{{ target_mac }}"          # MAC地址
+              description: "{{ target_description }}"  # 描述
+              state: present                   # 確保存在
+        state: present                         # 整個DHCP server狀態
+      register: update_result
+      when: needs_update
+      tags:
+        - execute_update
+
+    # =======================================================================
+    # 步驟10：顯示執行結果
+    # =======================================================================
+    
+    - name: "🎉 配置更新成功"
+      debug:
+        msg: |
+          ✅✅✅ {{ operation_type }}成功！✅✅✅
+          
+          📋 更新詳情：
+          - Reservation ID: {{ reservation_id }}
+          - IP地址: {{ target_ip }}
+          - MAC地址: {{ target_mac }}
+          - 描述: {{ target_description }}
+          - DHCP Server ID: {{ dhcp_server_id }}
+          
+          🎯 FortiGate配置已成功更新！
+      when: needs_update and update_result is succeeded
+      tags:
+        - show_result
+
+    # =======================================================================
+    # 步驟11：最終執行摘要
+    # =======================================================================
+    
+    - name: "📊 執行摘要報告"
+      debug:
+        msg: |
+          ==========================================
+          📊 FortiGate DHCP 配置執行摘要
+          ==========================================
+          🎯 目標配置:
+             - IP: {{ target_ip }}
+             - MAC: {{ target_mac }}
+             - 描述: {{ target_description }}
+          
+          🔧 執行結果:
+             {% if needs_update and update_result is succeeded %}
+             - 狀態: ✅ {{ operation_type }}成功
+             - Reservation ID: {{ reservation_id }}
+             {% elif not needs_update %}
+             - 狀態: ℹ️  無需變更（配置已是最新）
+             {% else %}
+             - 狀態: ❌ 更新失敗
+             {% endif %}
+          
+          📅 執行時間: {{ ansible_date_time.iso8601 }}
+          ==========================================
+      tags:
+        - summary
