@@ -36,17 +36,23 @@
 
     - name: 3. 檢查點：如果發現 MAC 衝突則顯示錯誤並停止
       block:
-        - name: 顯示格式化的錯誤訊息
-          ansible.builtin.debug:
-            msg: |
+        # 關鍵修正：先將多行錯誤訊息存為變數
+        - name: 準備格式化的錯誤訊息
+          ansible.builtin.set_fact:
+            failure_message: |
               錯誤：執行停止。您提供的 MAC 位址 '{{ target_mac }}' 已被現有設定中的另一個物件使用。
               衝突物件 IP: {{ mac_conflict_object.ip }}
               衝突物件描述: {{ mac_conflict_object.description | default('N/A', true) }}
               請更換 MAC 位址後再試。
 
+        # 關鍵修正：使用 var 參數來印出變數，以保留換行
+        - name: 顯示格式化的錯誤訊息
+          ansible.builtin.debug:
+            var: failure_message
+
         - name: 停止執行
           ansible.builtin.fail:
-            msg: "因 MAC 位址衝突而停止執行。"
+            msg: "因 MAC 位址衝突而停止執行。詳情請見上方訊息。"
       when: mac_conflict_object is defined
 
     # --- 第二個檢查點：尋找目標 IP ---
