@@ -1,0 +1,108 @@
+---
+- name: FortiGate DHCP Reserved Address Management
+  hosts: fortigate
+  connection: httpapi
+  collections:
+    - fortinet.fortios
+  vars:
+    # 用戶輸入的參數
+    target_ip: "{{ ip_param }}"           # 來自AWX extra_vars
+    target_mac: "{{ mac_param }}"         # 來自AWX extra_vars  
+    target_description: "{{ desc_param }}" # 來自AWX extra_vars
+    dhcp_server_id: 3                     # DHCP server ID
+    
+  tasks:
+    - name: Get current DHCP server configuration
+      fortinet.fortios.fortios_system_dhcp_server:
+        vdom: "{{ vdom | default('root') }}"
+        access_token: "{{ access_token }}"
+        system_dhcp_server:
+          id: "{{ dhcp_server_id }}"
+        state: present
+      register: current_dhcp_config
+      
+    - name: Extract current reserved addresses
+      set_fact:
+        current_reserved_addresses: "{{ current_dhcp_config.meta.results.reserved_address | default([]) }}"
+        
+    - name: Find existing reservation by IP
+      set_fact:
+        existing_reservation_by_ip: "{{ current_reserved_addresses | selectattr('ip', 'equalto', target_ip) | first | default({}) }}"
+        
+    - name: Find existing reservation by MAC
+      set_fact:
+        existing_reservation_by_mac: "{{ current_reserved_addresses | selectattr('mac', 'equalto', target_mac) | first | default({}) }}"
+        
+    - name: Check for MAC conflict
+      set_fact:
+        mac_conflict: >-
+          {{
+            existing_reservation_by_mac != {} and 
+            existing_reservation_by_mac.ip != target_ip
+          }}
+          
+    - name: Display conflict information
+      debug:
+        msg: |
+          Target IP: {{ target_ip }}
+          Target MAC: {{ target_mac }}
+          Target Description: {{ target_description }}
+          Existing reservation by IP: {{ existing_reservation_by_ip }}
+          Existing reservation by MAC: {{ existing_reservation_by_mac }}
+          MAC Conflict detected: {{ mac_conflict }}
+          
+    - name: Stop execution if MAC conflict detected
+      fail:
+        msg: |
+          MAC conflict detected! 
+          MAC {{ target_mac }} is already assigned to IP {{ existing_reservation_by_mac.ip }}
+          Cannot assign it to IP {{ target_ip }}
+      when: mac_conflict
+      
+    - name: Determine operation type
+      set_fact:
+        operation_type: >-
+          {%- if existing_reservation_by_ip != {} -%}
+            update
+          {%- else -%}
+            create
+          {%- endif -%}
+        reservation_id: >-
+          {%- if existing_reservation_by_ip != {} -%}
+            {{ existing_reservation_by_ip.id }}
+          {%- else -%}
+            {{ (current_reserved_addresses | map(attribute='id') | map('int') | max | default(0)) + 1 }}
+          {%- endif -%}
+          
+    - name: Display operation details
+      debug:
+        msg: |
+          Operation: {{ operation_type }}
+          Reservation ID: {{ reservation_id }}
+          
+    - name: Create/Update reserved address
+      fortinet.fortios.fortios_system_dhcp_server:
+        vdom: "{{ vdom | default('root') }}"
+        access_token: "{{ access_token }}"
+        system_dhcp_server:
+          id: "{{ dhcp_server_id }}"
+          reserved_address:
+            - id: "{{ reservation_id }}"
+              ip: "{{ target_ip }}"
+              mac: "{{ target_mac }}"
+              description: "{{ target_description }}"
+        state: present
+      register: update_result
+      
+    - name: Display result
+      debug:
+        msg: |
+          {% if operation_type == 'update' %}
+          Successfully updated reserved address:
+          {% else %}
+          Successfully created reserved address:
+          {% endif %}
+          - ID: {{ reservation_id }}
+          - IP: {{ target_ip }}
+          - MAC: {{ target_mac }}
+          - Description: {{ target_description }}
