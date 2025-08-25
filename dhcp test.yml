@@ -8,7 +8,7 @@
 # 3. 支持新增和更新既有配置
 # 
 # 作者：VICI Network Team
-# 版本：v1.0
+# 版本：v1.1 - 修正selector名稱
 # =============================================================================
 
 - name: FortiGate DHCP Reserved Address 智能管理
@@ -60,9 +60,9 @@
         vdom: "{{ vdom_name }}"
         access_token: "{{ api_token }}"
         selectors:
-          - selector: system_dhcp_server        # 選擇DHCP server配置
+          - selector: system.dhcp_server           # ✅ 修正：使用正確的selector名稱
             params:
-              id: "{{ dhcp_server_id }}"       # 指定server ID
+              id: "{{ dhcp_server_id }}"           # 指定server ID
       register: dhcp_facts
       tags:
         - get_config
@@ -71,20 +71,41 @@
     # 步驟3：解析當前reserved-address配置
     # =======================================================================
     
+    - name: "📊 解析DHCP配置結果"
+      debug:
+        msg: |
+          🔍 DHCP配置查詢結果：
+          - 查詢成功: {{ dhcp_facts is succeeded }}
+          - 結果數量: {{ dhcp_facts.meta.results | length }}
+      tags:
+        - parse_config
+
     - name: "📊 解析當前reserved-address列表"
       set_fact:
         # 提取reserved_address陣列，如果不存在則設為空陣列
-        current_reserved_addresses: "{{ dhcp_facts.meta.results[0].reserved_address | default([]) }}"
+        current_reserved_addresses: "{{ dhcp_facts.meta.results[0]['reserved-address'] | default([]) }}"
+      when: dhcp_facts.meta.results | length > 0
+      tags:
+        - parse_config
+
+    - name: "📊 設定空的reserved-address列表"
+      set_fact:
+        current_reserved_addresses: []
+      when: dhcp_facts.meta.results | length == 0
       tags:
         - parse_config
 
     - name: "🔍 顯示當前所有reserved-address配置"
       debug:
         msg: |
-          當前共有 {{ current_reserved_addresses | length }} 個reserved-address配置：
+          當前DHCP Server {{ dhcp_server_id }} 共有 {{ current_reserved_addresses | length }} 個reserved-address配置：
+          {% if current_reserved_addresses | length > 0 %}
           {% for addr in current_reserved_addresses %}
           - ID: {{ addr.id }}, IP: {{ addr.ip }}, MAC: {{ addr.mac }}, 描述: {{ addr.description | default('無') }}
           {% endfor %}
+          {% else %}
+          （目前沒有任何reserved-address配置）
+          {% endif %}
       tags:
         - parse_config
 
@@ -196,7 +217,7 @@
         
         # 決定reservation ID：
         # - 如果有既有IP配置，使用既有ID
-        # - 如果沒有，使用當前最大ID+1
+        # - 如果沒有，使用當前最大ID+1（如果沒有任何配置則從1開始）
         reservation_id: >-
           {%- if existing_reservation_by_ip | length > 0 -%}
             {{ existing_reservation_by_ip.id }}
@@ -265,12 +286,11 @@
         access_token: "{{ api_token }}"
         system_dhcp_server:
           id: "{{ dhcp_server_id }}"           # DHCP Server ID
-          reserved_address:
+          reserved_address:                    # ✅ 修正：使用正確的屬性名稱
             - id: "{{ reservation_id }}"       # Reserved Address ID
               ip: "{{ target_ip }}"            # IP地址
               mac: "{{ target_mac }}"          # MAC地址
               description: "{{ target_description }}"  # 描述
-              state: present                   # 確保存在
         state: present                         # 整個DHCP server狀態
       register: update_result
       when: needs_update
@@ -299,7 +319,27 @@
         - show_result
 
     # =======================================================================
-    # 步驟11：最終執行摘要
+    # 步驟11：處理更新失敗的情況
+    # =======================================================================
+    
+    - name: "❌ 配置更新失敗"
+      debug:
+        msg: |
+          ❌❌❌ {{ operation_type }}失敗！❌❌❌
+          
+          📋 錯誤詳情：
+          {{ update_result.msg | default('未知錯誤') }}
+          
+          💡 請檢查：
+          1. FortiGate API權限
+          2. DHCP Server ID是否存在
+          3. 網路連接狀態
+      when: needs_update and update_result is failed
+      tags:
+        - show_result
+
+    # =======================================================================
+    # 步驟12：最終執行摘要
     # =======================================================================
     
     - name: "📊 執行摘要報告"
@@ -319,11 +359,13 @@
              - Reservation ID: {{ reservation_id }}
              {% elif not needs_update %}
              - 狀態: ℹ️  無需變更（配置已是最新）
+             {% elif needs_update and update_result is failed %}
+             - 狀態: ❌ {{ operation_type }}失敗
              {% else %}
-             - 狀態: ❌ 更新失敗
+             - 狀態: ⚠️  未執行更新操作
              {% endif %}
           
-          📅 執行時間: {{ ansible_date_time.iso8601 }}
+          📅 執行時間: {{ ansible_date_time.iso8601 | default('未知') }}
           ==========================================
       tags:
         - summary
