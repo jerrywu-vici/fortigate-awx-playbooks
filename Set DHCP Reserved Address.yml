@@ -23,33 +23,46 @@
       register: existing_reservations
 
     # --- 第一個檢查點：MAC 位址衝突檢查 ---
-    - name: 2. 檢查點：檢查 MAC 位址是否存在於任何設定中
-      ansible.builtin.fail:
-        msg: |
-          錯誤：執行停止。您提供的 MAC 位址 '{{ target_mac }}' 已被現有設定中的另一個物件使用。
-          衝突物件 IP: {{ item.ip }}
-          衝突物件描述: {{ item.description | default('N/A', true) }}
-          請更換 MAC 位址後再試。
-      # 條件：當找到一個物件，它的 MAC 與目標 MAC 相同(忽略大小寫)時，就觸發失敗。
-      when: item.mac.lower() == target_mac.lower()
+    - name: 2. 處理資料 - 尋找第一個 MAC 衝突物件
+      ansible.builtin.set_fact:
+        mac_conflict_object: "{{ item }}"
       loop: "{{ existing_reservations.json.results }}"
+      when:
+        # 只有在 mac_conflict_object 尚未被定義時，才設定它，以確保只找到第一個衝突
+        - mac_conflict_object is not defined
+        - item.mac.lower() == target_mac.lower()
       loop_control:
         label: "檢查 {{ item.ip }} 的 MAC 位址"
 
+    - name: 3. 檢查點：如果發現 MAC 衝突則顯示錯誤並停止
+      block:
+        - name: 顯示格式化的錯誤訊息
+          ansible.builtin.debug:
+            msg: |
+              錯誤：執行停止。您提供的 MAC 位址 '{{ target_mac }}' 已被現有設定中的另一個物件使用。
+              衝突物件 IP: {{ mac_conflict_object.ip }}
+              衝突物件描述: {{ mac_conflict_object.description | default('N/A', true) }}
+              請更換 MAC 位址後再試。
+
+        - name: 停止執行
+          ansible.builtin.fail:
+            msg: "因 MAC 位址衝突而停止執行。"
+      when: mac_conflict_object is defined
+
     # --- 第二個檢查點：尋找目標 IP ---
-    - name: 3. 尋找要更新的目標物件
+    - name: 4. 尋找要更新的目標物件
       ansible.builtin.set_fact:
         # 使用 selectattr 過濾器建立一個只包含目標 IP 物件的列表
         target_object_list: "{{ existing_reservations.json.results | selectattr('ip', 'equalto', target_ip) | list }}"
 
-    - name: 4. 檢查點：確認目標 IP 是否存在
+    - name: 5. 檢查點：確認目標 IP 是否存在
       ansible.builtin.fail:
         msg: "錯誤：在 DHCP Server {{ dhcp_server_id }} 中找不到目標 IP 位址 '{{ target_ip }}'。請確認 IP 是否正確。"
       # 條件：如果上一步建立的列表長度為 0，代表沒找到任何物件
       when: target_object_list | length == 0
 
     # --- 執行更新 ---
-    - name: 5. 如果找到物件且無衝突，則執行更新
+    - name: 6. 如果找到物件且無衝突，則執行更新
       ansible.builtin.uri:
         # API 路徑需要包含物件的 ID，我們從列表的第一個元素中獲取
         url: "https://{{ lookup('env', 'FORTIGATE_HOST') }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address/{{ target_object_list[0].id }}"
@@ -65,8 +78,8 @@
         status_code: 200
       register: update_result
 
-    # --- 關鍵修正：先將成功訊息存為變數 ---
-    - name: 6. 準備成功訊息
+    # --- 顯示成功訊息 ---
+    - name: 7. 準備成功訊息
       ansible.builtin.set_fact:
         success_message: |
           成功更新 DHCP 保留位址！
@@ -75,7 +88,7 @@
             更新後描述: {{ target_description }}
       when: update_result.json is defined and update_result.json.revision_changed | default(false)
 
-    - name: 7. 顯示更新成功訊息
+    - name: 8. 顯示更新成功訊息
       ansible.builtin.debug:
         var: success_message
       # 條件：只有在 success_message 變數被成功建立時才執行
