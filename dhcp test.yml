@@ -9,7 +9,7 @@
 # 4. 使用REST API直接調用，避免collection類型問題
 # 
 # 作者：VICI Network Team
-# 版本：v2.0 - REST API版本
+# 版本：v2.1 - 變數定義修正版
 # =============================================================================
 
 - name: FortiGate DHCP Reserved Address 智能管理
@@ -19,7 +19,7 @@
 
   vars:
     # =======================================================================
-    # 變數定義區
+    # 變數定義區（修正版）
     # =======================================================================
     
     # 用戶輸入參數（從AWX Survey或Extra Variables獲取）
@@ -30,11 +30,33 @@
     # FortiGate系統參數
     dhcp_server_id: "{{ server_id | default('3') }}"  # DHCP Server ID
     
-    # FortiGate連接參數（從環境變數或credential獲取）
-    fortigate_host: "{{ lookup('env', 'FORTIGATE_HOST') | default(fortigate_host_var) }}"
-    fortigate_token: "{{ lookup('env', 'FORTIGATE_API_TOKEN') | default(fortigate_access_token) }}"
+    # FortiGate連接參數（優先從AWX credential獲取，否則從環境變數）
+    fortigate_host: "{{ ansible_host | default(lookup('env', 'FORTIGATE_HOST')) }}"
+    fortigate_token: "{{ fortigate_access_token | default(lookup('env', 'FORTIGATE_API_TOKEN')) }}"
     
   tasks:
+    # =======================================================================
+    # 步驟0：參數驗證
+    # =======================================================================
+    
+    - name: "🔍 驗證必要參數"
+      ansible.builtin.fail:
+        msg: |
+          ❌ 缺少必要的FortiGate連接參數！
+          
+          請確保以下參數已正確設定：
+          1. FortiGate Host: {{ fortigate_host | default('未設定') }}
+          2. FortiGate API Token: {{ '已設定' if fortigate_token else '未設定' }}
+          
+          設定方式：
+          - 使用AWX Credential (推薦)
+          - 或在Extra Variables中設定:
+            ansible_host: "your_fortigate_ip"
+            fortigate_access_token: "your_api_token"
+      when: not fortigate_host or not fortigate_token
+      tags:
+        - validate
+
     # =======================================================================
     # 步驟1：輸入參數驗證和顯示
     # =======================================================================
@@ -50,6 +72,7 @@
           📝 目標描述: {{ target_description }}
           🏷️  DHCP Server ID: {{ dhcp_server_id }}
           🌐 FortiGate Host: {{ fortigate_host }}
+          🔑 API Token: {{ '已設定' if fortigate_token else '未設定' }}
           ==========================================
 
     # =======================================================================
@@ -326,57 +349,7 @@
         - show_result
 
     # =======================================================================
-    # 步驟10：處理執行失敗的情況
-    # =======================================================================
-    
-    - name: "❌ 更新失敗"
-      ansible.builtin.debug:
-        msg:
-          - "❌❌❌ 更新配置失敗！❌❌❌"
-          - ""
-          - "📋 錯誤詳情："
-          - "{{ update_result.msg | default('未知錯誤') }}"
-          - ""
-          - "🔍 HTTP狀態碼: {{ update_result.status | default('未知') }}"
-          - ""
-          - "💡 請檢查："
-          - "  1. FortiGate API權限"
-          - "  2. DHCP Server ID {{ dhcp_server_id }} 是否存在"
-          - "  3. 網路連接狀態"
-          - "  4. API Token是否有效"
-      when: 
-        - needs_update
-        - target_object_list | length > 0
-        - update_result is defined
-        - update_result is failed
-      tags:
-        - show_result
-
-    - name: "❌ 創建失敗"
-      ansible.builtin.debug:
-        msg:
-          - "❌❌❌ 創建配置失敗！❌❌❌"
-          - ""
-          - "📋 錯誤詳情："
-          - "{{ create_result.msg | default('未知錯誤') }}"
-          - ""
-          - "🔍 HTTP狀態碼: {{ create_result.status | default('未知') }}"
-          - ""
-          - "💡 請檢查："
-          - "  1. FortiGate API權限"
-          - "  2. DHCP Server ID {{ dhcp_server_id }} 是否存在"
-          - "  3. IP地址是否已被使用"
-          - "  4. API Token是否有效"
-      when: 
-        - needs_update
-        - target_object_list | length == 0
-        - create_result is defined
-        - create_result is failed
-      tags:
-        - show_result
-
-    # =======================================================================
-    # 步驟11：最終執行摘要
+    # 步驟10：最終執行摘要
     # =======================================================================
     
     - name: "📊 執行摘要報告"
