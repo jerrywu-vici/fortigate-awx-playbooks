@@ -1,23 +1,22 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address 智能管理 Playbook
+# FortiGate DHCP Reserved Address 智能管理 Playbook (REST API版本)
 # 
 # 功能說明：
 # 1. 根據提供的IP、MAC、Description參數智能更新DHCP reserved-address
 # 2. 自動檢測MAC地址衝突，避免重複分配
 # 3. 支持新增和更新既有配置
+# 4. 使用REST API直接調用，避免collection類型問題
 # 
 # 作者：VICI Network Team
-# 版本：v1.2 - 修正參數類型問題
+# 版本：v2.0 - REST API版本
 # =============================================================================
 
 - name: FortiGate DHCP Reserved Address 智能管理
-  hosts: all
-  connection: httpapi
+  hosts: localhost
+  connection: local
   gather_facts: false
-  collections:
-    - fortinet.fortios
-  
+
   vars:
     # =======================================================================
     # 變數定義區
@@ -28,10 +27,12 @@
     target_mac: "{{ mac_param }}"                  # 目標MAC地址
     target_description: "{{ desc_param }}"        # 目標描述
     
-    # FortiGate系統參數（確保為整數類型）
-    dhcp_server_id: "{{ server_id | default(3) | int }}" # DHCP Server ID（確保為整數）
-    vdom_name: "{{ fortigate_vdom }}"              # VDOM名稱（來自credential）
-    api_token: "{{ fortigate_access_token }}"     # API Token（來自credential）
+    # FortiGate系統參數
+    dhcp_server_id: "{{ server_id | default('3') }}"  # DHCP Server ID
+    
+    # FortiGate連接參數（從環境變數或credential獲取）
+    fortigate_host: "{{ lookup('env', 'FORTIGATE_HOST') | default(fortigate_host_var) }}"
+    fortigate_token: "{{ lookup('env', 'FORTIGATE_API_TOKEN') | default(fortigate_access_token) }}"
     
   tasks:
     # =======================================================================
@@ -39,7 +40,7 @@
     # =======================================================================
     
     - name: "📋 顯示輸入參數"
-      debug:
+      ansible.builtin.debug:
         msg: |
           ==========================================
           📋 FortiGate DHCP Reserved Address 管理
@@ -47,212 +48,167 @@
           🎯 目標IP地址: {{ target_ip }}
           🔗 目標MAC地址: {{ target_mac }}
           📝 目標描述: {{ target_description }}
-          🏷️  DHCP Server ID: {{ dhcp_server_id }} (類型: {{ dhcp_server_id | type_debug }})
-          🌐 VDOM: {{ vdom_name }}
+          🏷️  DHCP Server ID: {{ dhcp_server_id }}
+          🌐 FortiGate Host: {{ fortigate_host }}
           ==========================================
 
     # =======================================================================
-    # 步驟2：獲取FortiGate當前DHCP配置
+    # 步驟2：獲取FortiGate當前DHCP reserved-address配置
     # =======================================================================
     
-    - name: "🔍 獲取FortiGate當前DHCP Server配置"
-      fortinet.fortios.fortios_configuration_fact:
-        vdom: "{{ vdom_name }}"
-        access_token: "{{ api_token }}"
-        selectors:
-          - selector: system.dhcp_server           # 使用正確的selector名稱
-            params:
-              id: "{{ dhcp_server_id | int }}"     # ✅ 確保ID為整數類型
-      register: dhcp_facts
+    - name: "🔍 獲取所有現有的DHCP保留位址"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_token }}"
+        validate_certs: false
+        status_code: 200
+      register: existing_reservations
       tags:
         - get_config
 
-    # =======================================================================
-    # 步驟3：解析當前reserved-address配置
-    # =======================================================================
-    
-    - name: "📊 顯示原始DHCP配置查詢結果"
-      debug:
+    - name: "📊 顯示獲取到的配置"
+      ansible.builtin.debug:
         msg: |
-          🔍 DHCP配置查詢結果：
-          - 查詢成功: {{ dhcp_facts is succeeded }}
-          - 結果數量: {{ dhcp_facts.meta.results | length }}
-          - 原始結果: {{ dhcp_facts.meta.results }}
-      tags:
-        - parse_config
-
-    - name: "📊 解析當前reserved-address列表"
-      set_fact:
-        # 嘗試不同的屬性名稱來提取reserved_address
-        current_reserved_addresses: >-
-          {{
-            dhcp_facts.meta.results[0]['reserved-address'] | default(
-              dhcp_facts.meta.results[0]['reserved_address'] | default([])
-            )
-          }}
-      when: dhcp_facts.meta.results | length > 0
-      tags:
-        - parse_config
-
-    - name: "📊 設定空的reserved-address列表（無配置時）"
-      set_fact:
-        current_reserved_addresses: []
-      when: dhcp_facts.meta.results | length == 0
-      tags:
-        - parse_config
-
-    - name: "🔍 顯示當前所有reserved-address配置"
-      debug:
-        msg: |
-          當前DHCP Server {{ dhcp_server_id }} 共有 {{ current_reserved_addresses | length }} 個reserved-address配置：
-          {% if current_reserved_addresses | length > 0 %}
-          {% for addr in current_reserved_addresses %}
+          🔍 DHCP配置獲取結果：
+          - 查詢成功: {{ existing_reservations.status == 200 }}
+          - 保留位址數量: {{ existing_reservations.json.results | length }}
+          
+          📋 當前所有reserved-address配置：
+          {% if existing_reservations.json.results | length > 0 %}
+          {% for addr in existing_reservations.json.results %}
           - ID: {{ addr.id }}, IP: {{ addr.ip }}, MAC: {{ addr.mac }}, 描述: {{ addr.description | default('無') }}
           {% endfor %}
           {% else %}
           （目前沒有任何reserved-address配置）
           {% endif %}
       tags:
-        - parse_config
+        - get_config
 
     # =======================================================================
-    # 步驟4：查找既有配置（按IP和MAC分別查找）
+    # 步驟3：MAC衝突檢測邏輯
     # =======================================================================
     
-    - name: "🔍 查找既有IP配置"
-      set_fact:
-        # 查找是否有相同IP的配置
-        existing_reservation_by_ip: "{{ current_reserved_addresses | selectattr('ip', 'equalto', target_ip) | list | first | default({}) }}"
-      tags:
-        - find_existing
-
-    - name: "🔍 查找既有MAC配置"
-      set_fact:
-        # 查找是否有相同MAC的配置
-        existing_reservation_by_mac: "{{ current_reserved_addresses | selectattr('mac', 'equalto', target_mac) | list | first | default({}) }}"
-      tags:
-        - find_existing
-
-    # =======================================================================
-    # 步驟5：MAC衝突檢測邏輯
-    # =======================================================================
-    
-    - name: "⚠️  執行MAC衝突檢測"
-      set_fact:
-        # MAC衝突條件：
-        # 1. 找到既有MAC配置 且
-        # 2. 該MAC配置的IP與目標IP不同
-        mac_conflict: >-
-          {{
-            (existing_reservation_by_mac | length > 0) and 
-            (existing_reservation_by_mac.ip != target_ip)
-          }}
+    - name: "🔍 尋找MAC位址相同的既有配置"
+      ansible.builtin.set_fact:
+        mac_conflict_object: "{{ item }}"
+      loop: "{{ existing_reservations.json.results }}"
+      when:
+        - mac_conflict_object is not defined  # 只找第一個匹配的
+        - item.mac.lower() == target_mac.lower()  # MAC地址比較（不區分大小寫）
+      loop_control:
+        label: "檢查 MAC {{ item.mac }}"
       tags:
         - conflict_check
 
-    - name: "📋 顯示衝突檢測結果"
-      debug:
+    - name: "📋 顯示MAC衝突檢測結果"
+      ansible.builtin.debug:
         msg: |
           ==========================================
-          🔍 衝突檢測分析結果
+          🔍 MAC衝突檢測分析結果
           ==========================================
-          {% if existing_reservation_by_ip | length > 0 %}
-          ✅ 找到既有IP配置:
-             - ID: {{ existing_reservation_by_ip.id }}
-             - IP: {{ existing_reservation_by_ip.ip }}
-             - MAC: {{ existing_reservation_by_ip.mac }}
-             - 描述: {{ existing_reservation_by_ip.description | default('無') }}
-          {% else %}
-          ℹ️  未找到既有IP配置（將創建新配置）
-          {% endif %}
-          
-          {% if existing_reservation_by_mac | length > 0 %}
+          {% if mac_conflict_object is defined %}
           ⚠️  找到既有MAC配置:
-             - ID: {{ existing_reservation_by_mac.id }}
-             - IP: {{ existing_reservation_by_mac.ip }}
-             - MAC: {{ existing_reservation_by_mac.mac }}
-             - 描述: {{ existing_reservation_by_mac.description | default('無') }}
+             - ID: {{ mac_conflict_object.id }}
+             - IP: {{ mac_conflict_object.ip }}
+             - MAC: {{ mac_conflict_object.mac }}
+             - 描述: {{ mac_conflict_object.description | default('無') }}
+          
+          🚫 MAC衝突狀態: {{ '是' if (mac_conflict_object.ip != target_ip) else '否' }}
           {% else %}
           ℹ️  未找到既有MAC配置
+          🚫 MAC衝突狀態: 否
           {% endif %}
-          
-          🚫 MAC衝突狀態: {{ '是' if mac_conflict else '否' }}
           ==========================================
       tags:
         - conflict_check
 
     # =======================================================================
-    # 步驟6：MAC衝突時停止執行
+    # 步驟4：MAC衝突時停止執行
     # =======================================================================
     
-    - name: "🚫 MAC衝突 - 停止執行"
-      fail:
-        msg: |
-          ❌❌❌ MAC衝突檢測失敗！❌❌❌
-          
-          🔴 衝突詳情：
-          - 目標MAC: {{ target_mac }}
-          - 目標IP: {{ target_ip }}
-          - 衝突原因: MAC {{ target_mac }} 已被分配給 IP {{ existing_reservation_by_mac.ip }}
-          
-          💡 解決方案：
-          1. 使用不同的MAC地址
-          2. 或者確認是否要更新既有IP {{ existing_reservation_by_mac.ip }} 的配置
-          
-          ⚠️  為避免網路衝突，操作已終止！
-      when: mac_conflict
+    - name: "🚫 MAC衝突檢測 - 顯示錯誤詳情"
+      ansible.builtin.debug:
+        msg:
+          - "❌❌❌ MAC衝突檢測失敗！❌❌❌"
+          - ""
+          - "🔴 衝突詳情："
+          - "  - 目標MAC: {{ target_mac }}"
+          - "  - 目標IP: {{ target_ip }}"  
+          - "  - 衝突原因: MAC {{ target_mac }} 已被分配給 IP {{ mac_conflict_object.ip }}"
+          - ""
+          - "💡 解決方案："
+          - "  1. 使用不同的MAC地址"
+          - "  2. 或者確認是否要更新既有IP {{ mac_conflict_object.ip }} 的配置"
+          - ""
+          - "⚠️  為避免網路衝突，操作將被終止！"
+      when: mac_conflict_object is defined and mac_conflict_object.ip != target_ip
+      tags:
+        - conflict_check
+
+    - name: "🚫 停止執行 - MAC衝突"
+      ansible.builtin.fail:
+        msg: "因MAC位址衝突而停止執行。MAC {{ target_mac }} 已被IP {{ mac_conflict_object.ip }} 使用。"
+      when: mac_conflict_object is defined and mac_conflict_object.ip != target_ip
       tags:
         - conflict_check
 
     # =======================================================================
-    # 步驟7：決定操作類型（新增或更新）
+    # 步驟5：尋找目標IP配置，決定是新增還是更新
     # =======================================================================
     
-    - name: "🎯 決定操作類型和參數"
-      set_fact:
-        # 判斷是否需要更新：
-        # 1. 沒有既有IP配置（需要新增）或
-        # 2. MAC地址不同 或
-        # 3. 描述不同
-        needs_update: >-
-          {{
-            (existing_reservation_by_ip | length == 0) or
-            (existing_reservation_by_ip.mac != target_mac) or
-            (existing_reservation_by_ip.description | default('') != target_description)
-          }}
-        
-        # 決定reservation ID（確保為整數）：
-        # - 如果有既有IP配置，使用既有ID
-        # - 如果沒有，使用當前最大ID+1（如果沒有任何配置則從1開始）
-        reservation_id: >-
-          {%- if existing_reservation_by_ip | length > 0 -%}
-            {{ existing_reservation_by_ip.id | int }}
-          {%- else -%}
-            {{ ((current_reserved_addresses | map(attribute='id') | map('int') | list | max) + 1) if current_reserved_addresses else 1 }}
-          {%- endif -%}
-        
+    - name: "🔍 尋找目標IP的既有配置"
+      ansible.builtin.set_fact:
+        target_object_list: "{{ existing_reservations.json.results | selectattr('ip', 'equalto', target_ip) | list }}"
+      tags:
+        - find_target
+
+    - name: "🎯 決定操作類型"
+      ansible.builtin.set_fact:
         # 決定操作類型
         operation_type: >-
-          {%- if existing_reservation_by_ip | length > 0 -%}
+          {%- if target_object_list | length > 0 -%}
             更新既有配置
           {%- else -%}
             創建新配置
           {%- endif -%}
+        
+        # 決定是否需要執行操作
+        needs_update: >-
+          {%- if target_object_list | length == 0 -%}
+            true
+          {%- else -%}
+            {{
+              (target_object_list[0].mac != target_mac) or
+              (target_object_list[0].description | default('') != target_description)
+            }}
+          {%- endif -%}
+        
+        # 如果是更新，取得目標對象
+        target_object: "{{ target_object_list[0] if target_object_list | length > 0 else {} }}"
       tags:
-        - determine_action
+        - find_target
 
     - name: "📋 顯示操作計畫"
-      debug:
+      ansible.builtin.debug:
         msg: |
           ==========================================
           📋 操作執行計畫
           ==========================================
           🎯 操作類型: {{ operation_type }}
-          🏷️  Reservation ID: {{ reservation_id }} (類型: {{ reservation_id | type_debug }})
           🔄 需要更新: {{ '是' if needs_update else '否' }}
           
+          {% if target_object_list | length > 0 %}
+          📊 既有配置:
+          - ID: {{ target_object.id }}
+          - IP: {{ target_object.ip }}
+          - MAC: {{ target_object.mac }}
+          - 描述: {{ target_object.description | default('無') }}
+          {% endif %}
+          
           {% if needs_update %}
-          📝 將要執行的更新：
+          📝 將要執行的{{ operation_type }}：
           - IP地址: {{ target_ip }}
           - MAC地址: {{ target_mac }}
           - 描述: {{ target_description }}
@@ -261,99 +217,170 @@
           {% endif %}
           ==========================================
       tags:
-        - determine_action
+        - find_target
 
     # =======================================================================
-    # 步驟8：跳過不必要的更新
+    # 步驟6：跳過不必要的更新
     # =======================================================================
     
     - name: "✅ 配置已是最新狀態"
-      debug:
-        msg: |
-          ✅✅✅ 配置檢查完成 ✅✅✅
-          
-          🎉 當前配置已符合目標狀態：
-          - IP: {{ target_ip }}
-          - MAC: {{ target_mac }}
-          - 描述: {{ target_description }}
-          
-          💡 無需執行任何變更操作！
+      ansible.builtin.debug:
+        msg:
+          - "✅✅✅ 配置檢查完成 ✅✅✅"
+          - ""
+          - "🎉 當前配置已符合目標狀態："
+          - "  - IP: {{ target_ip }}"
+          - "  - MAC: {{ target_mac }}"
+          - "  - 描述: {{ target_description }}"
+          - ""
+          - "💡 無需執行任何變更操作！"
       when: not needs_update
       tags:
         - skip_update
 
     # =======================================================================
-    # 步驟9：執行DHCP配置更新
+    # 步驟7：執行更新既有配置
     # =======================================================================
     
-    - name: "🔧 {{ operation_type }} - 執行DHCP配置更新"
-      fortinet.fortios.fortios_system_dhcp_server:
-        vdom: "{{ vdom_name }}"
-        access_token: "{{ api_token }}"
-        system_dhcp_server:
-          id: "{{ dhcp_server_id | int }}"      # ✅ 確保DHCP Server ID為整數
-          reserved_address:                     # 使用正確的屬性名稱
-            - id: "{{ reservation_id | int }}"  # ✅ 確保Reserved Address ID為整數
-              ip: "{{ target_ip }}"             # IP地址
-              mac: "{{ target_mac }}"           # MAC地址
-              description: "{{ target_description }}"  # 描述
-        state: present                          # 整個DHCP server狀態
+    - name: "🔧 更新既有DHCP保留位址"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address/{{ target_object.id }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ fortigate_token }}"
+        body:
+          mac: "{{ target_mac }}"
+          description: "{{ target_description }}"
+        body_format: json
+        validate_certs: false
+        status_code: 200
       register: update_result
-      when: needs_update
+      when: needs_update and target_object_list | length > 0
       tags:
         - execute_update
 
     # =======================================================================
-    # 步驟10：顯示執行結果
+    # 步驟8：執行創建新配置
     # =======================================================================
     
-    - name: "🎉 配置更新成功"
-      debug:
-        msg: |
-          ✅✅✅ {{ operation_type }}成功！✅✅✅
-          
-          📋 更新詳情：
-          - Reservation ID: {{ reservation_id }}
-          - IP地址: {{ target_ip }}
-          - MAC地址: {{ target_mac }}
-          - 描述: {{ target_description }}
-          - DHCP Server ID: {{ dhcp_server_id }}
-          
-          🎯 FortiGate配置已成功更新！
-      when: needs_update and update_result is succeeded
+    - name: "🆕 創建新DHCP保留位址"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ fortigate_token }}"
+        body:
+          ip: "{{ target_ip }}"
+          mac: "{{ target_mac }}"
+          description: "{{ target_description }}"
+        body_format: json
+        validate_certs: false
+        status_code: 200
+      register: create_result
+      when: needs_update and target_object_list | length == 0
+      tags:
+        - execute_create
+
+    # =======================================================================
+    # 步驟9：顯示執行結果
+    # =======================================================================
+    
+    - name: "🎉 更新成功"
+      ansible.builtin.debug:
+        msg:
+          - "✅✅✅ 更新既有配置成功！✅✅✅"
+          - ""
+          - "📋 更新詳情："
+          - "  - 目標IP: {{ target_ip }}"
+          - "  - 更新後MAC: {{ target_mac }}"
+          - "  - 更新後描述: {{ target_description }}"
+          - "  - DHCP Server ID: {{ dhcp_server_id }}"
+          - ""
+          - "🎯 FortiGate配置已成功更新！"
+      when: 
+        - needs_update
+        - target_object_list | length > 0
+        - update_result is defined
+        - update_result.json.revision_changed | default(false)
+      tags:
+        - show_result
+
+    - name: "🎉 創建成功"
+      ansible.builtin.debug:
+        msg:
+          - "✅✅✅ 創建新配置成功！✅✅✅"
+          - ""
+          - "📋 創建詳情："
+          - "  - 新IP: {{ target_ip }}"
+          - "  - MAC: {{ target_mac }}"
+          - "  - 描述: {{ target_description }}"
+          - "  - DHCP Server ID: {{ dhcp_server_id }}"
+          - ""
+          - "🎯 FortiGate配置已成功創建！"
+      when: 
+        - needs_update
+        - target_object_list | length == 0
+        - create_result is defined
+        - create_result.json.revision_changed | default(false)
       tags:
         - show_result
 
     # =======================================================================
-    # 步驟11：處理更新失敗的情況
+    # 步驟10：處理執行失敗的情況
     # =======================================================================
     
-    - name: "❌ 配置更新失敗"
-      debug:
-        msg: |
-          ❌❌❌ {{ operation_type }}失敗！❌❌❌
-          
-          📋 錯誤詳情：
-          {{ update_result.msg | default('未知錯誤') }}
-          
-          🔍 詳細錯誤信息：
-          {{ update_result }}
-          
-          💡 請檢查：
-          1. FortiGate API權限
-          2. DHCP Server ID {{ dhcp_server_id }} 是否存在
-          3. 網路連接狀態
-          4. VDOM權限設定
-      when: needs_update and update_result is failed
+    - name: "❌ 更新失敗"
+      ansible.builtin.debug:
+        msg:
+          - "❌❌❌ 更新配置失敗！❌❌❌"
+          - ""
+          - "📋 錯誤詳情："
+          - "{{ update_result.msg | default('未知錯誤') }}"
+          - ""
+          - "🔍 HTTP狀態碼: {{ update_result.status | default('未知') }}"
+          - ""
+          - "💡 請檢查："
+          - "  1. FortiGate API權限"
+          - "  2. DHCP Server ID {{ dhcp_server_id }} 是否存在"
+          - "  3. 網路連接狀態"
+          - "  4. API Token是否有效"
+      when: 
+        - needs_update
+        - target_object_list | length > 0
+        - update_result is defined
+        - update_result is failed
+      tags:
+        - show_result
+
+    - name: "❌ 創建失敗"
+      ansible.builtin.debug:
+        msg:
+          - "❌❌❌ 創建配置失敗！❌❌❌"
+          - ""
+          - "📋 錯誤詳情："
+          - "{{ create_result.msg | default('未知錯誤') }}"
+          - ""
+          - "🔍 HTTP狀態碼: {{ create_result.status | default('未知') }}"
+          - ""
+          - "💡 請檢查："
+          - "  1. FortiGate API權限"
+          - "  2. DHCP Server ID {{ dhcp_server_id }} 是否存在"
+          - "  3. IP地址是否已被使用"
+          - "  4. API Token是否有效"
+      when: 
+        - needs_update
+        - target_object_list | length == 0
+        - create_result is defined
+        - create_result is failed
       tags:
         - show_result
 
     # =======================================================================
-    # 步驟12：最終執行摘要
+    # 步驟11：最終執行摘要
     # =======================================================================
     
     - name: "📊 執行摘要報告"
-      debug:
+      ansible.builtin.debug:
         msg: |
           ==========================================
           📊 FortiGate DHCP 配置執行摘要
@@ -364,15 +391,17 @@
              - 描述: {{ target_description }}
           
           🔧 執行結果:
-             {% if needs_update and update_result is succeeded %}
-             - 狀態: ✅ {{ operation_type }}成功
-             - Reservation ID: {{ reservation_id }}
-             {% elif not needs_update %}
+             {% if not needs_update %}
              - 狀態: ℹ️  無需變更（配置已是最新）
-             {% elif needs_update and update_result is failed %}
-             - 狀態: ❌ {{ operation_type }}失敗
+             {% elif target_object_list | length > 0 and update_result is defined and update_result.json.revision_changed | default(false) %}
+             - 狀態: ✅ 更新既有配置成功
+             - 目標ID: {{ target_object.id }}
+             {% elif target_object_list | length == 0 and create_result is defined and create_result.json.revision_changed | default(false) %}
+             - 狀態: ✅ 創建新配置成功
+             {% elif (update_result is defined and update_result is failed) or (create_result is defined and create_result is failed) %}
+             - 狀態: ❌ 執行失敗
              {% else %}
-             - 狀態: ⚠️  未執行更新操作
+             - 狀態: ⚠️  未執行操作
              {% endif %}
           
           📅 執行時間: {{ ansible_date_time.iso8601 | default('未知') }}
