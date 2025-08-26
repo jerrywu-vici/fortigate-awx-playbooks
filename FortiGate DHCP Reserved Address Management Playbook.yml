@@ -1,0 +1,459 @@
+---
+# =============================================================================
+# FortiGate DHCP Reserved Address Management Playbook v3.0
+# 
+# 功能說明：
+# 1. 支援新增/修改DHCP reserved-address (原v2.1功能)
+# 2. 新增MAC刪除功能 - 將指定MAC的設定還原為保留狀態
+# 3. 自動檢測MAC地址衝突，避免重複分配
+# 4. 使用AWX Survey選擇功能類型
+# 
+# 作者：VICI Network Team
+# 版本：v3.0 - 新增MAC刪除功能
+# =============================================================================
+
+- name: FortiGate DHCP Reserved Address Management v3.0
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # =======================================================================
+    # 變數定義區
+    # =======================================================================
+    
+    # 功能選擇參數（從AWX Survey獲取）
+    operation_mode: "{{ operation_type }}"         # 1=新增修改, 2=刪除
+    
+    # 新增/修改功能參數（當operation_mode=1時使用）
+    target_ip: "{{ ip_param | default('') }}"
+    target_mac: "{{ mac_param | default('') }}"
+    target_description: "{{ desc_param | default('') }}"
+    
+    # 刪除功能參數（當operation_mode=2時使用）
+    delete_mac: "{{ delete_mac_param | default('') }}"
+    
+    # FortiGate系統參數
+    dhcp_server_id: "{{ server_id | default('3') }}"
+    
+    # FortiGate連接參數（從AWX Credential自動注入）
+    fortigate_host: "{{ fortigate_host }}"
+    fortigate_token: "{{ fortigate_access_token }}"
+    vdom_name: "{{ fortigate_vdom | default('root') }}"
+    
+  tasks:
+    # =======================================================================
+    # 步驟0：Credential參數驗證
+    # =======================================================================
+    
+    - name: "🔍 Validate AWX Credential Parameters"
+      ansible.builtin.fail:
+        msg: |
+          ❌ 缺少必要的FortiGate Credential參數！請確保已正確設定FortiGate Credential。
+      when: fortigate_host is not defined or fortigate_token is not defined
+      tags:
+        - validate
+
+    # =======================================================================
+    # 步驟1：顯示功能選擇和參數
+    # =======================================================================
+    
+    - name: "📋 Display Function Selection and Input Parameters"
+      ansible.builtin.debug:
+        msg: |
+          ==========================================
+          📋 FortiGate DHCP Reserved Address 管理 v3.0
+          ==========================================
+          🎯 選擇的功能: {{ '新增/修改設定' if operation_mode == '1' else '刪除設定' if operation_mode == '2' else '未知功能' }}
+          🏷️  DHCP Server ID: {{ dhcp_server_id }}
+          🌐 FortiGate Host: {{ fortigate_host }}
+          🏠 VDOM: {{ vdom_name }}
+          
+          {% if operation_mode == '1' %}
+          📝 新增/修改參數:
+          - 目標IP地址: {{ target_ip }}
+          - 目標MAC地址: {{ target_mac }}
+          - 目標描述: {{ target_description }}
+          {% elif operation_mode == '2' %}
+          🗑️ 刪除參數:
+          - 要刪除的MAC地址: {{ delete_mac }}
+          {% endif %}
+          ==========================================
+
+    # =======================================================================
+    # 步驟2：獲取FortiGate當前DHCP reserved-address配置
+    # =======================================================================
+    
+    - name: "🔍 Get Current DHCP Reserved Addresses"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_token }}"
+        validate_certs: false
+        status_code: 200
+      register: existing_reservations
+      tags:
+        - get_config
+
+    - name: "📊 Display Current Configuration"
+      ansible.builtin.debug:
+        msg: |
+          🔍 DHCP配置獲取結果：
+          - 查詢成功: {{ existing_reservations.status == 200 }}
+          - 保留位址數量: {{ existing_reservations.json.results | length }}
+          
+          📋 當前所有reserved-address配置：
+          {% if existing_reservations.json.results | length > 0 %}
+          {% for addr in existing_reservations.json.results %}
+          - ID: {{ addr.id }}, IP: {{ addr.ip }}, MAC: {{ addr.mac }}, 描述: {{ addr.description | default('無') }}
+          {% endfor %}
+          {% else %}
+          （目前沒有任何reserved-address配置）
+          {% endif %}
+      tags:
+        - get_config
+
+    # =======================================================================
+    # 條件分支：新增/修改功能 (operation_mode == '1')
+    # =======================================================================
+
+    - name: "🔍 MAC Conflict Detection - Create/Update Function"
+      ansible.builtin.set_fact:
+        mac_conflict_object: "{{ item }}"
+      loop: "{{ existing_reservations.json.results }}"
+      when:
+        - operation_mode == '1'
+        - mac_conflict_object is not defined
+        - item.mac.lower() == target_mac.lower()
+      loop_control:
+        label: "檢查 MAC {{ item.mac }}"
+      tags:
+        - create_update
+
+    - name: "📋 MAC Conflict Detection Result - Create/Update Function"
+      ansible.builtin.debug:
+        msg: |
+          🔍 MAC衝突檢測結果:
+          {% if mac_conflict_object is defined %}
+          ⚠️  找到既有MAC配置: ID {{ mac_conflict_object.id }}, IP {{ mac_conflict_object.ip }}
+          🚫 MAC衝突狀態: {{ '是' if (mac_conflict_object.ip != target_ip) else '否' }}
+          {% else %}
+          ℹ️  未找到既有MAC配置，無衝突
+          {% endif %}
+      when: operation_mode == '1'
+      tags:
+        - create_update
+
+    - name: "🚫 Stop Execution - MAC Conflict"
+      ansible.builtin.fail:
+        msg: "MAC衝突！MAC {{ target_mac }} 已被IP {{ mac_conflict_object.ip }} 使用。"
+      when: 
+        - operation_mode == '1'
+        - mac_conflict_object is defined 
+        - mac_conflict_object.ip != target_ip
+      tags:
+        - create_update
+
+    - name: "🔍 Find Target IP Configuration"
+      ansible.builtin.set_fact:
+        target_object_list: "{{ existing_reservations.json.results | selectattr('ip', 'equalto', target_ip) | list }}"
+      when: operation_mode == '1'
+      tags:
+        - create_update
+
+    - name: "🎯 Determine Operation Type - Create/Update Function"
+      ansible.builtin.set_fact:
+        create_update_operation_type: >-
+          {%- if target_object_list | length > 0 -%}
+            更新既有配置
+          {%- else -%}
+            創建新配置
+          {%- endif -%}
+        needs_update: >-
+          {%- if target_object_list | length == 0 -%}
+            true
+          {%- else -%}
+            {{
+              (target_object_list[0].mac != target_mac) or
+              (target_object_list[0].description | default('') != target_description)
+            }}
+          {%- endif -%}
+        target_object: "{{ target_object_list[0] if target_object_list | length > 0 else {} }}"
+      when: operation_mode == '1'
+      tags:
+        - create_update
+
+    - name: "✅ Configuration Already Up-to-Date"
+      ansible.builtin.debug:
+        msg: "✅ 當前配置已符合目標狀態，無需更新！"
+      when: 
+        - operation_mode == '1'
+        - not needs_update
+      tags:
+        - create_update
+
+    - name: "🔧 Update Existing DHCP Reserved Address"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address/{{ target_object.id }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ fortigate_token }}"
+        body:
+          mac: "{{ target_mac }}"
+          description: "{{ target_description }}"
+        body_format: json
+        validate_certs: false
+        status_code: 200
+      register: update_result
+      when: 
+        - operation_mode == '1'
+        - needs_update 
+        - target_object_list | length > 0
+      tags:
+        - create_update
+
+    - name: "🆕 Create New DHCP Reserved Address"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ fortigate_token }}"
+        body:
+          ip: "{{ target_ip }}"
+          mac: "{{ target_mac }}"
+          description: "{{ target_description }}"
+        body_format: json
+        validate_certs: false
+        status_code: 200
+      register: create_result
+      when: 
+        - operation_mode == '1'
+        - needs_update 
+        - target_object_list | length == 0
+      tags:
+        - create_update
+
+    - name: "🎉 Create/Update Operation Complete"
+      ansible.builtin.debug:
+        msg: |
+          ✅ {{ create_update_operation_type }}成功！
+          {% if target_object_list | length > 0 %}
+          - 更新的配置: ID {{ target_object.id }}
+          {% endif %}
+          - IP: {{ target_ip }}
+          - MAC: {{ target_mac }}
+          - 描述: {{ target_description }}
+      when: 
+        - operation_mode == '1'
+        - needs_update 
+        - ((update_result is defined and update_result.json.revision_changed | default(false)) or (create_result is defined and create_result.json.revision_changed | default(false)))
+      tags:
+        - create_update
+
+    # =======================================================================
+    # 條件分支：MAC刪除功能 (operation_mode == '2')
+    # =======================================================================
+
+    - name: "🔍 Search for MAC Address to Delete"
+      ansible.builtin.set_fact:
+        delete_target_object: "{{ item }}"
+      loop: "{{ existing_reservations.json.results }}"
+      when:
+        - operation_mode == '2'
+        - delete_target_object is not defined
+        - item.mac.lower() == delete_mac.lower()
+      loop_control:
+        label: "搜尋 MAC {{ item.mac }}"
+      tags:
+        - delete
+
+    - name: "❌ MAC Not Found - Stop Execution"
+      ansible.builtin.fail:
+        msg: |
+          ❌ 未找到指定的MAC地址！
+          
+          🔍 搜尋的MAC: {{ delete_mac }}
+          📋 目前並沒有這個MAC的設定
+          
+          💡 請檢查：
+          1. MAC地址格式是否正確 (XX:XX:XX:XX:XX:XX)
+          2. MAC地址是否確實存在於DHCP Server {{ dhcp_server_id }} 中
+          
+          ⚠️ 操作已停止
+      when: 
+        - operation_mode == '2'
+        - delete_target_object is not defined
+      tags:
+        - delete
+
+    - name: "📋 Found MAC Configuration to Delete"
+      ansible.builtin.debug:
+        msg: |
+          ✅ 找到要刪除的MAC配置！
+          
+          📊 當前配置詳情：
+          - ID: {{ delete_target_object.id }}
+          - IP地址: {{ delete_target_object.ip }}
+          - MAC地址: {{ delete_target_object.mac }}
+          - 描述: {{ delete_target_object.description | default('無') }}
+      when: 
+        - operation_mode == '2'
+        - delete_target_object is defined
+      tags:
+        - delete
+
+    - name: "🧮 Calculate Reserved MAC Address"
+      ansible.builtin.set_fact:
+        # 提取IP的第四段
+        ip_fourth_octet: "{{ delete_target_object.ip.split('.')[3] }}"
+        # 生成保留MAC格式: ff:ff:ff:ff:f1:XX (XX是IP第四段)
+        reserved_mac: "ff:ff:ff:ff:f1:{{ '%02d' | format(ip_fourth_octet | int) }}"
+      when: 
+        - operation_mode == '2'
+        - delete_target_object is defined
+      tags:
+        - delete
+
+    - name: "⚠️ Confirm Delete Operation"
+      ansible.builtin.pause:
+        prompt: |
+          
+          ==========================================
+          ⚠️  確認刪除操作
+          ==========================================
+          
+          📊 即將還原的配置：
+          - ID: {{ delete_target_object.id }}
+          - IP地址: {{ delete_target_object.ip }} (保持不變)
+          - 當前MAC: {{ delete_target_object.mac }}
+          - 還原後MAC: {{ reserved_mac }}
+          - 當前描述: {{ delete_target_object.description | default('無') }}
+          - 還原後描述: Reserved
+          
+          🔄 還原規則說明：
+          1. IP地址保持不變: {{ delete_target_object.ip }}
+          2. MAC地址還原為: {{ reserved_mac }}
+             (格式: ff:ff:ff:ff:f1:XX，XX為IP第四段 {{ ip_fourth_octet }})
+          3. 描述還原為: Reserved
+          
+          ⚠️ 此操作將會永久修改FortiGate配置！
+          
+          請輸入 'yes' 確認執行，或按Enter取消:
+      register: delete_confirmation
+      when: 
+        - operation_mode == '2'
+        - delete_target_object is defined
+      tags:
+        - delete
+
+    - name: "🚫 User Cancelled Delete Operation"
+      ansible.builtin.fail:
+        msg: |
+          ℹ️ 用戶取消了刪除操作
+          
+          📋 操作摘要：
+          - 找到的MAC: {{ delete_mac }}
+          - 對應的IP: {{ delete_target_object.ip }}
+          - 操作狀態: 已取消
+          
+          💡 配置保持原狀，未進行任何變更
+      when: 
+        - operation_mode == '2'
+        - delete_target_object is defined
+        - delete_confirmation.user_input | lower != 'yes'
+      tags:
+        - delete
+
+    - name: "🔧 Execute MAC Delete - Restore to Reserved Configuration"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address/{{ delete_target_object.id }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ fortigate_token }}"
+        body:
+          ip: "{{ delete_target_object.ip }}"
+          mac: "{{ reserved_mac }}"
+          description: "Reserved"
+        body_format: json
+        validate_certs: false
+        status_code: 200
+      register: delete_result
+      when: 
+        - operation_mode == '2'
+        - delete_target_object is defined
+        - delete_confirmation.user_input | lower == 'yes'
+      tags:
+        - delete
+
+    - name: "🎉 MAC Delete Operation Complete"
+      ansible.builtin.debug:
+        msg: |
+          ✅✅✅ MAC刪除操作成功！✅✅✅
+          
+          📋 還原結果：
+          - 配置ID: {{ delete_target_object.id }}
+          - IP地址: {{ delete_target_object.ip }} (未變更)
+          - 原始MAC: {{ delete_target_object.mac }}
+          - 還原後MAC: {{ reserved_mac }}
+          - 原始描述: {{ delete_target_object.description | default('無') }}
+          - 還原後描述: Reserved
+          
+          🎯 FortiGate DHCP配置已成功還原為保留狀態！
+      when: 
+        - operation_mode == '2'
+        - delete_result is defined
+        - delete_result.json.revision_changed | default(false)
+      tags:
+        - delete
+
+    - name: "❌ MAC Delete Operation Failed"
+      ansible.builtin.debug:
+        msg: |
+          ❌ MAC刪除操作失敗
+          
+          📋 錯誤詳情：
+          {{ delete_result.msg | default('未知錯誤') }}
+          
+          💡 請檢查FortiGate連接和權限設定
+      when: 
+        - operation_mode == '2'
+        - delete_result is defined 
+        - delete_result is failed
+      tags:
+        - delete
+
+    # =======================================================================
+    # 最終執行摘要
+    # =======================================================================
+    
+    - name: "📊 Final Execution Summary"
+      ansible.builtin.debug:
+        msg: |
+          ==========================================
+          📊 FortiGate DHCP 配置執行摘要
+          ==========================================
+          🎯 執行的功能: {{ '新增/修改設定' if operation_mode == '1' else '刪除設定' if operation_mode == '2' else '未知功能' }}
+          
+          {% if operation_mode == '1' %}
+          📝 新增/修改結果:
+          - 目標IP: {{ target_ip }}
+          - 目標MAC: {{ target_mac }}
+          - 目標描述: {{ target_description }}
+          - 狀態: {{ '✅ 成功' if (needs_update and ((update_result is defined and update_result.json.revision_changed | default(false)) or (create_result is defined and create_result.json.revision_changed | default(false)))) else 'ℹ️ 無需變更' if not needs_update else '❌ 失敗' }}
+          {% elif operation_mode == '2' %}
+          🗑️ 刪除結果:
+          - 刪除的MAC: {{ delete_mac }}
+          {% if delete_target_object is defined %}
+          - 對應的IP: {{ delete_target_object.ip }}
+          - 還原後MAC: {{ reserved_mac | default('未計算') }}
+          - 狀態: {{ '✅ 成功' if (delete_result is defined and delete_result.json.revision_changed | default(false)) else '🚫 已取消' if (delete_confirmation is defined and delete_confirmation.user_input | lower != 'yes') else '❌ 失敗' }}
+          {% else %}
+          - 狀態: ❌ 未找到指定MAC
+          {% endif %}
+          {% endif %}
+          
+          📅 執行時間: {{ ansible_date_time.iso8601 | default('未知') }}
+          ==========================================
+      tags:
+        - summary
