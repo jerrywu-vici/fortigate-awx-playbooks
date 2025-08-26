@@ -1,105 +1,21 @@
 ---
-# =============================================================================
-# FortiGate DHCP Reserved Address Delete Execute Playbook
-# 
-# 功能說明：
-# 1. 接收來自Preview步驟的確認參數
-# 2. 執行實際的DHCP配置還原操作
-# 3. 僅在Workflow中使用，不單獨執行
-# 
-# 作者：VICI Network Team
-# 版本：v3.2 - Execute功能（用於Workflow）
-# =============================================================================
-
-- name: FortiGate DHCP Delete Execute - Step 2
+- name: FortiGate DHCP Delete Execute for Workflow
   hosts: localhost
   connection: local
   gather_facts: false
 
   vars:
-    # =======================================================================
-    # 變數定義區（從前一步驟接收）
-    # =======================================================================
-    
-    # 從Workflow前一步驟接收的參數
-    delete_mac: "{{ confirmed_delete_mac }}"
-    target_id: "{{ confirmed_target_id }}"
-    target_ip: "{{ confirmed_target_ip }}"
-    reserved_mac: "{{ confirmed_reserved_mac }}"
-    original_mac: "{{ confirmed_original_mac }}"
-    original_description: "{{ confirmed_original_description }}"
-    dhcp_server_id: "{{ confirmed_server_id }}"
-    
-    # FortiGate連接參數（從AWX Credential自動注入）
+    # 接收workflow變數
+    target_id: "{{ wf_target_id }}"
+    target_ip: "{{ wf_target_ip }}"
+    original_mac: "{{ wf_original_mac }}"
+    reserved_mac: "{{ wf_reserved_mac }}"
+    dhcp_server_id: "{{ wf_server_id }}"
     fortigate_host: "{{ fortigate_host }}"
     fortigate_token: "{{ fortigate_access_token }}"
-    vdom_name: "{{ fortigate_vdom | default('root') }}"
     
   tasks:
-    # =======================================================================
-    # 步驟1：驗證從前一步驟接收的參數
-    # =======================================================================
-    
-    - name: "🔍 Validate Workflow Parameters"
-      ansible.builtin.fail:
-        msg: |
-          ❌ 從Workflow前一步驟接收參數失敗！
-          
-          請確保：
-          1. 此Job Template僅在Workflow中執行
-          2. 前一步驟（Preview）已成功完成
-          3. Workflow變數傳遞正常
-      when: 
-        - delete_mac is not defined or
-          target_id is not defined or
-          target_ip is not defined or
-          reserved_mac is not defined
-
-    - name: "🔍 Validate Credential Parameters"
-      ansible.builtin.fail:
-        msg: |
-          ❌ 缺少必要的FortiGate Credential參數！
-      when: fortigate_host is not defined or fortigate_token is not defined
-
-    - name: "📋 Display Execute Parameters"
-      ansible.builtin.debug:
-        msg: |
-          ==========================================
-          📋 FortiGate DHCP Delete Execute
-          ==========================================
-          🚀 執行模式：將執行實際的配置變更
-          
-          📊 接收到的確認參數：
-          - 目標ID: {{ target_id }}
-          - 目標IP: {{ target_ip }}
-          - 原始MAC: {{ original_mac }}
-          - 還原MAC: {{ reserved_mac }}
-          - 原始描述: {{ original_description | default('(空白)') }}
-          - DHCP Server: {{ dhcp_server_id }}
-          
-          🌐 連接信息：
-          - FortiGate Host: {{ fortigate_host }}
-          - VDOM: {{ vdom_name }}
-          ==========================================
-
-    # =======================================================================
-    # 步驟2：執行刪除操作
-    # =======================================================================
-
-    - name: "⚠️ Final Confirmation Before Execution"
-      ansible.builtin.debug:
-        msg: |
-          ⚠️⚠️⚠️ 即將執行FortiGate配置變更 ⚠️⚠️⚠️
-          
-          📊 變更詳情：
-          - 配置ID: {{ target_id }}
-          - IP地址: {{ target_ip }} (保持不變)
-          - MAC變更: {{ original_mac }} → {{ reserved_mac }}
-          - 描述變更: "{{ original_description }}" → "Reserved"
-          
-          🚀 開始執行API呼叫...
-
-    - name: "🔧 Execute MAC Delete - Restore to Reserved Configuration"
+    - name: "🔧 Execute Delete Operation"
       ansible.builtin.uri:
         url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address/{{ target_id }}"
         method: PUT
@@ -112,85 +28,11 @@
         body_format: json
         validate_certs: false
         status_code: 200
-      register: delete_result
+      register: result
 
-    # =======================================================================
-    # 步驟3：結果處理
-    # =======================================================================
-
-    - name: "🎉 MAC Delete Operation Successful"
+    - name: "🎉 Operation Complete"
       ansible.builtin.debug:
         msg: |
-          ✅✅✅ MAC刪除操作執行成功！✅✅✅
-          
-          📋 執行結果詳情：
-          - 配置ID: {{ target_id }}
-          - IP地址: {{ target_ip }} ✅ 保持不變
-          - MAC地址: {{ original_mac }} → {{ reserved_mac }} ✅ 已還原
-          - 描述: "{{ original_description }}" → "Reserved" ✅ 已更新
-          - HTTP狀態: {{ delete_result.status }}
-          - 配置已變更: {{ delete_result.json.revision_changed | default(false) }}
-          
-          🎯 FortiGate DHCP配置已成功還原為保留狀態！
-          
-          📊 API回應摘要：
-          - 請求成功: ✅
-          - 配置版本已更新: {{ '✅ 是' if delete_result.json.revision_changed | default(false) else '❌ 否' }}
-      when: 
-        - delete_result is defined
-        - delete_result.status == 200
-
-    - name: "❌ MAC Delete Operation Failed"
-      ansible.builtin.debug:
-        msg: |
-          ❌❌❌ MAC刪除操作執行失敗 ❌❌❌
-          
-          📋 失敗詳情：
-          - HTTP狀態碼: {{ delete_result.status | default('未知') }}
-          - 錯誤訊息: {{ delete_result.msg | default('未知錯誤') }}
-          - API回應: {{ delete_result.json | default('無回應') }}
-          
-          💡 可能的原因：
-          1. FortiGate連接問題
-          2. API Token權限不足
-          3. 配置ID已變更
-          4. 網路連線問題
-          5. FortiGate系統忙碌
-          
-          🔧 建議處理方式：
-          1. 檢查FortiGate連線狀態
-          2. 驗證API Token權限
-          3. 重新執行Preview步驟確認配置
-      when: 
-        - delete_result is defined 
-        - delete_result.status != 200
-
-    # =======================================================================
-    # 步驟4：最終摘要
-    # =======================================================================
-    
-    - name: "📊 Workflow Execution Summary"
-      ansible.builtin.debug:
-        msg: |
-          ==========================================
-          📊 Workflow執行完整摘要
-          ==========================================
-          
-          🔄 Workflow步驟：
-          1. ✅ Preview完成 - 找到目標MAC配置
-          2. {{ '✅ Execute完成' if (delete_result.status == 200) else '❌ Execute失敗' }} - {{ '配置已還原' if (delete_result.status == 200) else '配置未變更' }}
-          
-          📊 最終結果：
-          - 處理的MAC: {{ delete_mac }}
-          - 對應IP: {{ target_ip }}
-          - 還原狀態: {{ '✅ 成功' if (delete_result.status == 200) else '❌ 失敗' }}
-          - 配置ID: {{ target_id }}
-          
-          {% if delete_result.status == 200 %}
-          🎯 操作成功完成！DHCP配置已還原為保留狀態。
-          {% else %}
-          ⚠️ 操作未完成，請檢查錯誤信息並重試。
-          {% endif %}
-          
-          📅 完成時間: {{ ansible_date_time.iso8601 | default('未知') }}
-          ==========================================
+          ✅ 刪除操作成功！
+          - MAC {{ original_mac }} → {{ reserved_mac }}
+          - 描述已設為 Reserved
