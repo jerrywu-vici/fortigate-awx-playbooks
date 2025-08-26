@@ -1,66 +1,17 @@
 ---
-# =============================================================================
-# FortiGate DHCP Reserved Address Delete Preview Playbook
-# 
-# 功能說明：
-# 1. 根據MAC地址搜尋既有DHCP reserved-address配置
-# 2. 顯示即將被刪除/還原的配置詳情
-# 3. 計算還原後的保留MAC格式
-# 4. 僅供預覽，不執行任何變更操作
-# 
-# 作者：VICI Network Team
-# 版本：v3.2 - Preview功能（用於Workflow）
-# =============================================================================
-
-- name: FortiGate DHCP Delete Preview - Step 1
+- name: FortiGate DHCP Delete Preview for Workflow
   hosts: localhost
   connection: local
   gather_facts: false
 
   vars:
-    # =======================================================================
-    # 變數定義區
-    # =======================================================================
-    
-    # 用戶輸入參數（從AWX Survey獲取）  
     delete_mac: "{{ delete_mac_param }}"
-    
-    # FortiGate系統參數
     dhcp_server_id: "{{ server_id | default('3') }}"
-    
-    # FortiGate連接參數（從AWX Credential自動注入）
     fortigate_host: "{{ fortigate_host }}"
     fortigate_token: "{{ fortigate_access_token }}"
     vdom_name: "{{ fortigate_vdom | default('root') }}"
     
   tasks:
-    # =======================================================================
-    # 步驟1：參數驗證
-    # =======================================================================
-    
-    - name: "🔍 Validate AWX Credential Parameters"
-      ansible.builtin.fail:
-        msg: |
-          ❌ 缺少必要的FortiGate Credential參數！請確保已正確設定FortiGate Credential。
-      when: fortigate_host is not defined or fortigate_token is not defined
-
-    - name: "📋 Display Preview Parameters"
-      ansible.builtin.debug:
-        msg: |
-          ==========================================
-          📋 FortiGate DHCP Delete Preview
-          ==========================================
-          🔍 預覽模式：僅顯示配置，不執行變更
-          🗑️ 要檢查的MAC地址: {{ delete_mac }}
-          🏷️  DHCP Server ID: {{ dhcp_server_id }}
-          🌐 FortiGate Host: {{ fortigate_host }}
-          🏠 VDOM: {{ vdom_name }}
-          ==========================================
-
-    # =======================================================================
-    # 步驟2：獲取當前DHCP配置
-    # =======================================================================
-    
     - name: "🔍 Get Current DHCP Reserved Addresses"
       ansible.builtin.uri:
         url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address"
@@ -71,133 +22,47 @@
         status_code: 200
       register: existing_reservations
 
-    - name: "📊 Display All Current Configurations"
-      ansible.builtin.debug:
-        msg: |
-          📋 當前DHCP Server {{ dhcp_server_id }} 所有配置：
-          {% if existing_reservations.json.results | length > 0 %}
-          {% for addr in existing_reservations.json.results %}
-          - ID: {{ addr.id }}, IP: {{ addr.ip }}, MAC: {{ addr.mac }}, 描述: {{ addr.description | default('無') }}
-          {% endfor %}
-          {% else %}
-          （目前沒有任何reserved-address配置）
-          {% endif %}
-
-    # =======================================================================
-    # 步驟3：搜尋目標MAC
-    # =======================================================================
-
-    - name: "🔍 Search for Target MAC Address"
+    - name: "🔍 Search for Target MAC"
       ansible.builtin.set_fact:
         target_object: "{{ item }}"
       loop: "{{ existing_reservations.json.results }}"
       when:
         - target_object is not defined
         - item.mac.lower() == delete_mac.lower()
-      loop_control:
-        label: "搜尋 MAC {{ item.mac }}"
 
-    - name: "❌ MAC Not Found - Cannot Proceed"
+    - name: "❌ MAC Not Found"
       ansible.builtin.fail:
-        msg: |
-          ❌❌❌ 預覽失敗：未找到指定的MAC地址！❌❌❌
-          
-          🔍 搜尋的MAC: {{ delete_mac }}
-          📋 在DHCP Server {{ dhcp_server_id }} 中未找到此MAC
-          
-          💡 請檢查：
-          1. MAC地址格式是否正確 (XX:XX:XX:XX:XX:XX)
-          2. MAC地址是否確實存在
-          3. DHCP Server ID是否正確
-          
-          📋 當前存在的MAC地址：
-          {% if existing_reservations.json.results | length > 0 %}
-          {% for addr in existing_reservations.json.results %}
-          - {{ addr.mac }} (IP: {{ addr.ip }})
-          {% endfor %}
-          {% else %}
-          (無任何配置)
-          {% endif %}
-          
-          ⚠️ Workflow將停止，不會繼續執行刪除操作
+        msg: "未找到MAC: {{ delete_mac }}"
       when: target_object is not defined
 
-    # =======================================================================
-    # 步驟4：計算還原配置
-    # =======================================================================
-
-    - name: "🧮 Calculate Reserved Configuration"
+    - name: "🧮 Calculate Reserved MAC"
       ansible.builtin.set_fact:
-        ip_fourth_octet: "{{ target_object.ip.split('.')[3] }}"
         reserved_mac: "ff:ff:ff:ff:f1:{{ '%02d' | format(target_object.ip.split('.')[3] | int) }}"
-      when: target_object is defined
 
-    # =======================================================================
-    # 步驟5：顯示詳細預覽信息
-    # =======================================================================
-
-    - name: "📋 Display Delete Preview Details"
+    - name: "📋 Display Preview Information"
       ansible.builtin.debug:
         msg: |
-          ✅✅✅ 找到目標MAC配置！✅✅✅
+          ✅ 找到要刪除的MAC配置：
           
-          ==========================================
-          📊 刪除操作預覽
-          ==========================================
+          📊 當前配置：
+          - ID: {{ target_object.id }}
+          - IP: {{ target_object.ip }}
+          - MAC: {{ target_object.mac }}
+          - 描述: {{ target_object.description | default('無') }}
           
-          🎯 找到的配置：
-          - 配置ID: {{ target_object.id }}
-          - IP地址: {{ target_object.ip }}
-          - 當前MAC: {{ target_object.mac }}
-          - 當前描述: {{ target_object.description | default('(空白)') }}
-          
-          🔄 執行刪除後的配置：
-          - 配置ID: {{ target_object.id }} (不變)
-          - IP地址: {{ target_object.ip }} (不變)
-          - 還原後MAC: {{ reserved_mac }}
-          - 還原後描述: Reserved
-          
-          📐 還原規則說明：
-          1. IP地址保持不變: {{ target_object.ip }}
-          2. MAC地址還原規則: ff:ff:ff:ff:f1:{{ '%02d' | format(ip_fourth_octet | int) }}
-             - IP第四段: {{ ip_fourth_octet }}
-             - 對應MAC: {{ reserved_mac }}
-          3. 描述統一設為: Reserved
-          
-          ⚠️ 此操作將永久修改FortiGate配置！
-          ==========================================
+          🔄 刪除後將變為：
+          - IP: {{ target_object.ip }} (不變)
+          - MAC: {{ reserved_mac }}
+          - 描述: Reserved
 
-    - name: "📢 Next Step Instructions"
-      ansible.builtin.debug:
-        msg: |
-          🚀🚀🚀 預覽完成，準備執行確認 🚀🚀🚀
-          
-          📋 下一步說明：
-          1. ✅ 預覽已完成，未執行任何變更
-          2. 🔍 請仔細檢查上述配置信息
-          3. ⚠️ 如果確認要執行刪除操作，Workflow將自動繼續
-          4. 🚫 如果不想執行，請手動停止Workflow
-          
-          💡 提醒：
-          - MAC {{ delete_mac }} 將被還原為 {{ reserved_mac }}
-          - 描述將從 "{{ target_object.description | default('(空白)') }}" 改為 "Reserved"
-          - IP {{ target_object.ip }} 保持不變
-          
-          🎯 準備傳遞參數給執行步驟...
-
-    # =======================================================================
-    # 步驟6：設定Workflow變數（傳遞給下一步）
-    # =======================================================================
-
-    - name: "📤 Set Workflow Variables for Next Step"
+    # 重要：設定workflow變數供後續步驟使用
+    - name: "📤 Set Workflow Variables"
       ansible.builtin.set_stats:
         data:
-          # 傳遞給下一個Job Template的變數
-          confirmed_delete_mac: "{{ delete_mac }}"
-          confirmed_target_id: "{{ target_object.id }}"
-          confirmed_target_ip: "{{ target_object.ip }}"
-          confirmed_reserved_mac: "{{ reserved_mac }}"
-          confirmed_original_mac: "{{ target_object.mac }}"
-          confirmed_original_description: "{{ target_object.description | default('') }}"
-          confirmed_server_id: "{{ dhcp_server_id }}"
-          preview_completed: "yes"
+          wf_target_id: "{{ target_object.id }}"
+          wf_target_ip: "{{ target_object.ip }}"  
+          wf_original_mac: "{{ target_object.mac }}"
+          wf_reserved_mac: "{{ reserved_mac }}"
+          wf_original_desc: "{{ target_object.description | default('') }}"
+          wf_server_id: "{{ dhcp_server_id }}"
+          wf_delete_mac: "{{ delete_mac }}"
