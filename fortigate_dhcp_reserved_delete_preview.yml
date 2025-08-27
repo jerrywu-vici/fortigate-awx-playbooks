@@ -1,5 +1,5 @@
 ---
-- name: FortiGate DHCP Delete Preview for Workflow
+- name: FortiGate DHCP Delete Preview for Workflow v3.3
   hosts: localhost
   connection: local
   gather_facts: false
@@ -12,6 +12,23 @@
     vdom_name: "{{ fortigate_vdom | default('root') }}"
     
   tasks:
+    - name: "🔍 Validate Credentials"
+      ansible.builtin.fail:
+        msg: "缺少FortiGate Credential參數"
+      when: fortigate_host is not defined or fortigate_token is not defined
+
+    - name: "📋 Display Preview Parameters"
+      ansible.builtin.debug:
+        msg: |
+          ==========================================
+          📋 FortiGate DHCP Delete 預覽 v3.3
+          ==========================================
+          🔍 預覽模式：顯示配置，等待人工確認
+          🗑️ 目標MAC: {{ delete_mac }}
+          🏷️  DHCP Server ID: {{ dhcp_server_id }}
+          🌐 FortiGate Host: {{ fortigate_host }}
+          ==========================================
+
     - name: "🔍 Get Current DHCP Reserved Addresses"
       ansible.builtin.uri:
         url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address"
@@ -22,6 +39,18 @@
         status_code: 200
       register: existing_reservations
 
+    - name: "📊 Display All Current Configurations"
+      ansible.builtin.debug:
+        msg: |
+          📋 當前DHCP Server {{ dhcp_server_id }} 所有配置：
+          {% if existing_reservations.json.results | length > 0 %}
+          {% for addr in existing_reservations.json.results %}
+          - ID: {{ addr.id }}, IP: {{ addr.ip }}, MAC: {{ addr.mac }}, 描述: {{ addr.description | default('無') }}
+          {% endfor %}
+          {% else %}
+          （目前沒有任何reserved-address配置）
+          {% endif %}
+
     - name: "🔍 Search for Target MAC"
       ansible.builtin.set_fact:
         target_object: "{{ item }}"
@@ -29,40 +58,116 @@
       when:
         - target_object is not defined
         - item.mac.lower() == delete_mac.lower()
+      loop_control:
+        label: "搜尋 MAC {{ item.mac }}"
 
     - name: "❌ MAC Not Found"
       ansible.builtin.fail:
-        msg: "未找到MAC: {{ delete_mac }}"
+        msg: |
+          ❌❌❌ 未找到指定的MAC地址！❌❌❌
+          
+          🔍 搜尋的MAC: {{ delete_mac }}
+          📋 在DHCP Server {{ dhcp_server_id }} 中未找到此MAC
+          
+          📋 當前存在的MAC地址：
+          {% if existing_reservations.json.results | length > 0 %}
+          {% for addr in existing_reservations.json.results %}
+          - {{ addr.mac }} (IP: {{ addr.ip }})
+          {% endfor %}
+          {% else %}
+          (無任何配置)
+          {% endif %}
       when: target_object is not defined
 
-    - name: "🧮 Calculate Reserved MAC"
+    - name: "🧮 Calculate Reserved MAC Address (Final Corrected Version)"
       ansible.builtin.set_fact:
-        reserved_mac: "ff:ff:ff:ff:f1:{{ '%02d' | format(target_object.ip.split('.')[3] | int) }}"
+        ip_fourth_octet: "{{ target_object.ip.split('.')[3] }}"
+        # IP第四碼的第一位數字
+        first_digit: "{{ target_object.ip.split('.')[3][0] }}"
+        # IP第四碼的後兩位數字  
+        last_two_digits: "{{ target_object.ip.split('.')[3][1:] }}"
+        # 組成最終MAC: ff:ff:ff:ff:f{第一位}:{後兩位}
+        reserved_mac: "ff:ff:ff:ff:f{{ target_object.ip.split('.')[3][0] }}:{{ target_object.ip.split('.')[3][1:] }}"
+      when: target_object is defined
 
-    - name: "📋 Display Preview Information"
+    - name: "📋 Display MAC Calculation Details"
       ansible.builtin.debug:
         msg: |
-          ✅ 找到要刪除的MAC配置：
+          🧮 MAC地址計算詳情（正確版本）：
+          - 完整IP: {{ target_object.ip }}
+          - IP第四碼: {{ ip_fourth_octet }} (三位數字)
+          - 第一位數字: {{ first_digit }}
+          - 後兩位數字: {{ last_two_digits }}
+          - 最終MAC: {{ reserved_mac }}
           
-          📊 當前配置：
-          - ID: {{ target_object.id }}
-          - IP: {{ target_object.ip }}
-          - MAC: {{ target_object.mac }}
-          - 描述: {{ target_object.description | default('無') }}
-          
-          🔄 刪除後將變為：
-          - IP: {{ target_object.ip }} (不變)
-          - MAC: {{ reserved_mac }}
-          - 描述: Reserved
+          📐 計算規則驗證：
+          - MAC格式: ff:ff:ff:ff:fX:XX
+          - X = IP第四碼的第一位數字 ({{ first_digit }})
+          - XX = IP第四碼的後兩位數字 ({{ last_two_digits }})
+          - 範例: IP 192.168.250.103 → MAC ff:ff:ff:ff:f1:03
 
-    # 重要：設定workflow變數供後續步驟使用
-    - name: "📤 Set Workflow Variables"
+    - name: "📊 Display Delete Preview"
+      ansible.builtin.debug:
+        msg: |
+          ✅✅✅ 找到目標MAC配置！✅✅✅
+          
+          ==========================================
+          📊 刪除操作預覽
+          ==========================================
+          
+          🎯 當前配置：
+          - 配置ID: {{ target_object.id }}
+          - IP地址: {{ target_object.ip }}
+          - 當前MAC: {{ target_object.mac }}
+          - 當前描述: "{{ target_object.description | default('(空白)') }}"
+          
+          🔄 刪除後配置：
+          - 配置ID: {{ target_object.id }} (不變)
+          - IP地址: {{ target_object.ip }} (不變)
+          - 還原MAC: {{ reserved_mac }}
+          - 還原描述: "Reserved"
+          
+          📐 還原規則說明：
+          1. IP地址保持不變: {{ target_object.ip }}
+          2. MAC地址還原規則: 
+             - 格式: ff:ff:ff:ff:fX:XX
+             - IP第四碼: {{ ip_fourth_octet }}
+             - X = 第一位數字: {{ first_digit }}
+             - XX = 後兩位數字: {{ last_two_digits }}
+             - 結果: {{ reserved_mac }}
+          3. 描述統一設為: "Reserved"
+          
+          ⚠️ 此操作將永久修改FortiGate配置！
+          ==========================================
+
+    - name: "📤 Set Workflow Variables for Next Step"
       ansible.builtin.set_stats:
         data:
           wf_target_id: "{{ target_object.id }}"
-          wf_target_ip: "{{ target_object.ip }}"  
+          wf_target_ip: "{{ target_object.ip }}"
           wf_original_mac: "{{ target_object.mac }}"
           wf_reserved_mac: "{{ reserved_mac }}"
           wf_original_desc: "{{ target_object.description | default('') }}"
           wf_server_id: "{{ dhcp_server_id }}"
           wf_delete_mac: "{{ delete_mac }}"
+          wf_ip_fourth_octet: "{{ ip_fourth_octet }}"
+          wf_first_digit: "{{ first_digit }}"
+          wf_last_two_digits: "{{ last_two_digits }}"
+
+    - name: "🎯 Preview Complete - Waiting for Approval"
+      ansible.builtin.debug:          
+        msg: |
+          📋📋📋 預覽階段完成 📋📋📋
+          
+          ✅ 配置分析完成，等待人工確認
+          🔄 Workflow將暫停在Approval Node
+          ⚠️ 請仔細檢查上述信息後決定是否繼續執行
+          
+          📊 預覽摘要：
+          - 目標MAC: {{ delete_mac }}
+          - 對應IP: {{ target_object.ip }}
+          - 還原MAC: {{ reserved_mac }}
+          - 規則: IP{{ ip_fourth_octet }} → f{{ first_digit }}:{{ last_two_digits }}
+          
+          🚀 確認無誤請在AWX中批准操作
+          🚫 如有疑慮請拒絕操作
