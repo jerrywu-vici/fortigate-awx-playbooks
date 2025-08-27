@@ -30,9 +30,14 @@
         status_code: 200
       register: result
 
-    - name: "🎉 Operation Complete"
+    - name: "🧮 Verify MAC Calculation (Corrected)"
       ansible.builtin.debug:
         msg: |
-          ✅ 刪除操作成功！
-          - MAC {{ original_mac }} → {{ reserved_mac }}
-          - 描述已設為 Reserved
+          🔍 MAC還原計算驗證：
+          - IP: {{ target_ip }}
+          - IP第四碼: {{ ip_fourth_octet }}
+          - 第一位數字: {{ wf_first_digit }}
+          - 後兩位數字: {{ wf_last_two_digits }}
+          - 還原MAC: {{ reserved_mac }}
+          - 預期MAC: ff:ff:ff:ff:f{{ wf_first_digit }}:{{ wf_last_two_digits }}
+          - 計算正確: {{ '✅' if reserved_mac == 'ff:ff:ff:ff:f' + wf_first_digit + ':' + wf_last_two_digits else '❌' }}
