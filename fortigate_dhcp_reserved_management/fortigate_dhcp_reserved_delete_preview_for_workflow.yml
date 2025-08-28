@@ -1,13 +1,13 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address Delete Preview For Workflow Playbook v4.1
+# FortiGate DHCP Reserved Address Delete Preview For Workflow Playbook v4.2
 # 用途：預覽要刪除的MAC配置，計算還原後的MAC地址
 # 優化：API連線測試、MAC格式驗證、執行時間估算、增強錯誤處理
-# 修正：解決變數遞迴引用問題
+# 修正：解決變數遞迴引用問題和類型錯誤
 # 輸出：顯示當前配置和預計變更內容，設定workflow變數
 # =============================================================================
 
-- name: FortiGate DHCP Delete Preview For Workflow v4.1
+- name: FortiGate DHCP Delete Preview For Workflow v4.2
   hosts: localhost
   connection: local
   gather_facts: true
@@ -26,7 +26,7 @@
     # 記錄開始時間
     - name: "⏰ Record Start Time"
       ansible.builtin.set_fact:
-        preview_start_time: "{{ ansible_date_time.epoch }}"
+        preview_start_time: "{{ ansible_date_time.epoch | int }}"
 
     # 參數驗證
     - name: "🔍 Validate Credentials"
@@ -82,10 +82,10 @@
 
     - name: "✅ API Connection Status"
       ansible.builtin.debug:
-        msg: "✅ API連線成功 | 回應時間: {{ api_test.elapsed }}s | FortiGate版本: {{ api_test.json.results.version | default('未知') }}"
+        msg: "✅ API連線成功 | 回應時間: {{ api_test.elapsed | float | round(2) }}s | FortiGate版本: {{ api_test.json.results.version | default('未知') }}"
 
     # 顯示預覽參數
-    - name: "📋 FortiGate DHCP Delete Preview v4.1"
+    - name: "📋 FortiGate DHCP Delete Preview v4.2"
       ansible.builtin.debug:
         msg: "===========================================" 
 
@@ -110,7 +110,7 @@
     # 統計資訊
     - name: "📊 DHCP Server Statistics"
       ansible.builtin.debug:
-        msg: "📊 統計 | DHCP Server {{ target_dhcp_server_id }} | 總配置數: {{ existing_reservations.json.results | length }} | API回應時間: {{ existing_reservations.elapsed }}s"
+        msg: "📊 統計 | DHCP Server {{ target_dhcp_server_id }} | 總配置數: {{ existing_reservations.json.results | length }} | API回應時間: {{ existing_reservations.elapsed | float | round(2) }}s"
 
     # 顯示當前配置
     - name: "📊 Current DHCP Server {{ target_dhcp_server_id }} Configurations"
@@ -227,15 +227,15 @@
         - target_object is defined
         - backup_enabled
 
-    # 計算執行時間估算
+    # 計算執行時間估算（修正版）
     - name: "⏱️ Execution Time Estimation"
       ansible.builtin.set_fact:
-        estimated_execution_time: "{{ (api_test.elapsed + existing_reservations.elapsed) * 2 + 5 }}"
+        estimated_execution_time: "{{ ((api_test.elapsed | float) + (existing_reservations.elapsed | float)) * 2 + 5 }}"
       when: target_object is defined
 
     - name: "⏱️ Time Estimation"
       ansible.builtin.debug:
-        msg: "⏱️ 估算 | 預覽用時: {{ ((ansible_date_time.epoch | int) - (preview_start_time | int)) }}s | 預計執行用時: {{ estimated_execution_time | round(1) }}s"
+        msg: "⏱️ 估算 | 預覽用時: {{ ((ansible_date_time.epoch | int) - preview_start_time) }}s | 預計執行用時: {{ estimated_execution_time | float | round(1) }}s"
       when: target_object is defined
 
     # 顯示預覽結果
@@ -263,7 +263,7 @@
       ansible.builtin.debug:
         msg: "⚠️ 警告：此操作將永久修改FortiGate配置！請在Approval Node中仔細確認後再批准執行。"
 
-    # 設定workflow變數（增強版）
+    # 設定workflow變數（修正版）
     - name: "📤 Set Enhanced Workflow Variables"
       ansible.builtin.set_stats:
         data:
@@ -277,13 +277,13 @@
           wf_ip_fourth_octet: "{{ ip_fourth_octet }}"
           wf_first_digit: "{{ first_digit }}"
           wf_last_two_digits: "{{ last_two_digits }}"
-          wf_already_reserved: "{{ already_reserved }}"
-          wf_ip_range_valid: "{{ ip_range_valid }}"
-          wf_backup_info: "{{ backup_info | default({}) }}"
-          wf_estimated_time: "{{ estimated_execution_time | default(0) }}"
+          wf_already_reserved: "{{ already_reserved | string }}"
+          wf_ip_range_valid: "{{ ip_range_valid | string }}"
+          wf_backup_info: "{{ backup_info | default({}) | to_json }}"
+          wf_estimated_time: "{{ estimated_execution_time | float | string }}"
           wf_vdom_name: "{{ fortigate_vdom | default('root') }}"
-          wf_preview_version: "v4.1"
+          wf_preview_version: "v4.2"
 
     - name: "🎯 Preview Complete"
       ansible.builtin.debug:
-        msg: "🎯 預覽完成 | 等待人工確認 | MAC {{ normalized_mac }} → {{ reserved_mac }} | IP {{ target_object.ip }} | 版本: v4.1"
+        msg: "🎯 預覽完成 | 等待人工確認 | MAC {{ normalized_mac }} → {{ reserved_mac }} | IP {{ target_object.ip }} | 版本: v4.2"
