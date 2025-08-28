@@ -265,4 +265,17 @@
 
     - name: "📊 Final Result"
       ansible.builtin.debug:
-        msg: "📊 最
+        msg: "📊 最終結果 | MAC刪除: {{ '✅成功' if (delete_result.status == 200) else '❌失敗' }} | {{ delete_mac }}→{{ reserved_mac }} | IP: {{ target_ip }}"
+
+    - name: "📊 Rule Applied"
+      ansible.builtin.debug:
+        msg: "📊 套用規則 | IP第四碼{{ ip_fourth_octet }} → MAC f{{ first_digit }}:{{ last_two_digits }} | 描述設為Reserved"
+
+    - name: "⏱️ Execution Summary"
+      ansible.builtin.debug:
+        msg: "⏱️ 執行時間: {{ actual_execution_time }}s | 預估時間: {{ estimated_time | round(1) }}s"
+      when: estimated_time > 0
+
+    - name: "📅 Completion Time"
+      ansible.builtin.debug:
+        msg: "📅 完成時間: {{ ansible_date_time.iso8601 }} | 版本: v4.4"
