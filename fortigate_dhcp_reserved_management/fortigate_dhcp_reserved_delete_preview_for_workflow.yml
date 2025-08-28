@@ -1,13 +1,13 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address Delete Preview For Workflow Playbook v4.3
+# FortiGate DHCP Reserved Address Delete Preview For Workflow Playbook v4.4
 # 用途：預覽要刪除的MAC配置，計算還原後的MAC地址
 # 優化：API連線測試、MAC格式驗證、執行時間估算、增強錯誤處理
-# 修正：徹底解決變數類型錯誤問題
+# 修正：移除API回應時間功能，簡化輸出
 # 輸出：顯示當前配置和預計變更內容，設定workflow變數
 # =============================================================================
 
-- name: FortiGate DHCP Delete Preview For Workflow v4.3
+- name: FortiGate DHCP Delete Preview For Workflow v4.4
   hosts: localhost
   connection: local
   gather_facts: true
@@ -23,7 +23,7 @@
     validate_certs: "{{ fortigate_validate_certs | default(false) | bool }}"
     
   tasks:
-    # 記錄開始時間（修正版）
+    # 記錄開始時間
     - name: "⏰ Record Start Time"
       ansible.builtin.set_fact:
         preview_start_time: "{{ ansible_date_time.epoch | int }}"
@@ -82,10 +82,10 @@
 
     - name: "✅ API Connection Status"
       ansible.builtin.debug:
-        msg: "✅ API連線成功 | 回應時間: {{ api_test.elapsed | float | round(2) }}s | FortiGate版本: {{ api_test.json.results.version | default('未知') }}"
+        msg: "✅ API連線成功 | FortiGate版本: {{ api_test.json.results.version | default('未知') }}"
 
     # 顯示預覽參數
-    - name: "📋 FortiGate DHCP Delete Preview v4.3"
+    - name: "📋 FortiGate DHCP Delete Preview v4.4"
       ansible.builtin.debug:
         msg: "===========================================" 
 
@@ -107,10 +107,10 @@
       retries: "{{ api_retries }}"
       delay: "{{ api_delay }}"
 
-    # 統計資訊
+    # 統計資訊（移除API回應時間）
     - name: "📊 DHCP Server Statistics"
       ansible.builtin.debug:
-        msg: "📊 統計 | DHCP Server {{ target_dhcp_server_id }} | 總配置數: {{ existing_reservations.json.results | length }} | API回應時間: {{ existing_reservations.elapsed | float | round(2) }}s"
+        msg: "📊 統計 | DHCP Server {{ target_dhcp_server_id }} | 總配置數: {{ existing_reservations.json.results | length }}"
 
     # 顯示當前配置
     - name: "📊 Current DHCP Server {{ target_dhcp_server_id }} Configurations"
@@ -227,18 +227,16 @@
         - target_object is defined
         - backup_enabled
 
-    # 計算執行時間估算（徹底修正版）
-    - name: "⏱️ Calculate Time Statistics"
+    # 計算預覽時間（簡化版）
+    - name: "⏱️ Calculate Preview Time"
       ansible.builtin.set_fact:
-        estimated_execution_time: "{{ ((api_test.elapsed | float) + (existing_reservations.elapsed | float)) * 2 + 5 }}"
-        current_time: "{{ ansible_date_time.epoch | int }}"
-        preview_time_used: "{{ (ansible_date_time.epoch | int) - (preview_start_time | int) }}"
+        preview_time_used: "{{ (ansible_date_time.epoch | int) - preview_start_time }}"
       when: target_object is defined
 
-    # 時間估算顯示（修正版）
-    - name: "⏱️ Time Estimation"
+    # 時間統計顯示（簡化版）
+    - name: "⏱️ Preview Time Summary"
       ansible.builtin.debug:
-        msg: "⏱️ 估算 | 預覽用時: {{ preview_time_used }}s | 預計執行用時: {{ estimated_execution_time | float | round(1) }}s"
+        msg: "⏱️ 預覽用時: {{ preview_time_used }}s"
       when: target_object is defined
 
     # 顯示預覽結果
@@ -266,8 +264,8 @@
       ansible.builtin.debug:
         msg: "⚠️ 警告：此操作將永久修改FortiGate配置！請在Approval Node中仔細確認後再批准執行。"
 
-    # 設定workflow變數（修正版）
-    - name: "📤 Set Enhanced Workflow Variables"
+    # 設定workflow變數（簡化版）
+    - name: "📤 Set Workflow Variables"
       ansible.builtin.set_stats:
         data:
           wf_target_id: "{{ target_object.id }}"
@@ -283,10 +281,9 @@
           wf_already_reserved: "{{ already_reserved | string }}"
           wf_ip_range_valid: "{{ ip_range_valid | string }}"
           wf_backup_info: "{{ backup_info | default({}) | to_json }}"
-          wf_estimated_time: "{{ estimated_execution_time | float | string }}"
           wf_vdom_name: "{{ fortigate_vdom | default('root') }}"
-          wf_preview_version: "v4.3"
+          wf_preview_version: "v4.4"
 
     - name: "🎯 Preview Complete"
       ansible.builtin.debug:
-        msg: "🎯 預覽完成 | 等待人工確認 | MAC {{ normalized_mac }} → {{ reserved_mac }} | IP {{ target_object.ip }} | 版本: v4.3"
+        msg: "🎯 預覽完成 | 等待人工確認 | MAC {{ normalized_mac }} → {{ reserved_mac }} | IP {{ target_object.ip }} | 版本: v4.4"
