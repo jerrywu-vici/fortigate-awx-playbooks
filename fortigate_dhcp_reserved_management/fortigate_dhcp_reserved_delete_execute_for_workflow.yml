@@ -2,7 +2,7 @@
 # =============================================================================
 # FortiGate DHCP Reserved Address Delete Execute For Workflow Playbook v4.5
 # 用途：執行實際的MAC刪除操作，將配置還原為Reserved狀態
-# 修正：時間計算錯誤、加入Credential驗證、優化備份說明
+# 修正：時間計算錯誤、加入Credential驗證、優化備份說明、修正YAML語法
 # 輸入：接收Preview步驟的workflow變數
 # 輸出：執行結果和操作摘要
 # =============================================================================
@@ -240,4 +240,42 @@
 
     - name: "🎉 Configuration Changes"
       ansible.builtin.debug:
-        msg: "🎉 變更完成 | ID: {{ target_id }} | IP: {{ target_ip }} | MAC: {{ original_mac }}→{{ reserved_mac }} | 描述
+        msg: "🎉 變更完成 | ID: {{ target_id }} | IP: {{ target_ip }} | MAC: {{ original_mac }}→{{ reserved_mac }} | 描述: Reserved"
+      when: 
+        - delete_result is defined
+        - delete_result.status == 200
+
+    # 失敗結果顯示
+    - name: "❌ Operation Failed"
+      ansible.builtin.debug:
+        msg: "❌ MAC刪除操作失敗 | HTTP狀態: {{ delete_result.status | default('未知') }} | 錯誤: {{ delete_result.msg | default('未知') }}"
+      when: 
+        - delete_result is defined 
+        - delete_result.status != 200
+
+    # 計算執行時間（修正版）
+    - name: "⏱️ Calculate Execution Statistics"
+      ansible.builtin.set_fact:
+        current_end_time: "{{ ansible_date_time.epoch | int }}"
+        actual_execution_time: "{{ (ansible_date_time.epoch | int) - (execution_start_time | int) }}"
+
+    # 最終摘要
+    - name: "📊 Workflow Summary"
+      ansible.builtin.debug:
+        msg: "=========================================="
+
+    - name: "📊 Final Result"
+      ansible.builtin.debug:
+        msg: "📊 最終結果 | MAC刪除: {{ '✅成功' if (delete_result.status == 200) else '❌失敗' }} | {{ delete_mac }}→{{ reserved_mac }} | IP: {{ target_ip }}"
+
+    - name: "📊 Rule Applied"
+      ansible.builtin.debug:
+        msg: "📊 套用規則 | IP第四碼{{ ip_fourth_octet }} → MAC f{{ first_digit }}:{{ last_two_digits }} | 描述設為Reserved"
+
+    - name: "⏱️ Execution Summary"
+      ansible.builtin.debug:
+        msg: "⏱️ 執行時間: {{ actual_execution_time }}s"
+
+    - name: "📅 Completion Time"
+      ansible.builtin.debug:
+        msg: "📅 完成時間: {{ ansible_date_time.iso8601 }} | 版本: v4.5"
