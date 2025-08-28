@@ -40,7 +40,7 @@
     validate_certs: "{{ fortigate_validate_certs | default(false) | bool }}"
     
   tasks:
-    # 記錄開始時間
+    # 記錄開始時間（修正版）
     - name: "⏰ Record Execution Start Time"
       ansible.builtin.set_fact:
         execution_start_time: "{{ ansible_date_time.epoch | int }}"
@@ -245,6 +245,7 @@
     - name: "⏱️ Execution Time Calculation"
       ansible.builtin.set_fact:
         actual_execution_time: "{{ ((ansible_date_time.epoch | int) - execution_start_time) | float }}"
+        current_end_time: "{{ ansible_date_time.epoch | int }}"
 
     # 最終摘要
     - name: "📊 Workflow Summary"
@@ -253,4 +254,4 @@
 
     - name: "📊 Final Result"
       ansible.builtin.debug:
-        msg: "📊 最終結果 | MAC刪除: {{ '✅成功' if (delete_result.status == 200) else '❌失敗
+        msg:
