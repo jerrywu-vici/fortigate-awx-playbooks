@@ -23,7 +23,7 @@
     validate_certs: "{{ fortigate_validate_certs | default(false) | bool }}"
     
   tasks:
-    # 記錄開始時間
+    # 記錄開始時間（修正版）
     - name: "⏰ Record Start Time"
       ansible.builtin.set_fact:
         preview_start_time: "{{ ansible_date_time.epoch | int }}"
@@ -231,11 +231,13 @@
     - name: "⏱️ Execution Time Estimation"
       ansible.builtin.set_fact:
         estimated_execution_time: "{{ ((api_test.elapsed | float) + (existing_reservations.elapsed | float)) * 2 + 5 }}"
+        current_time: "{{ ansible_date_time.epoch | int }}"
       when: target_object is defined
 
+    # 時間估算顯示（修正版）
     - name: "⏱️ Time Estimation"
       ansible.builtin.debug:
-        msg: "⏱️ 估算 | 預覽用時: {{ ((ansible_date_time.epoch | int) - preview_start_time) }}s | 預計執行用時: {{ estimated_execution_time | float | round(1) }}s"
+        msg: "⏱️ 估算 | 預覽用時: {{ (current_time - preview_start_time) }}s | 預計執行用時: {{ estimated_execution_time | float | round(1) }}s"
       when: target_object is defined
 
     # 顯示預覽結果
