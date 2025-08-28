@@ -1,14 +1,15 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address Delete Preview For Workflow Playbook
+# FortiGate DHCP Reserved Address Delete Preview For Workflow Playbook v4.0
 # 用途：預覽要刪除的MAC配置，計算還原後的MAC地址
+# 優化：API連線測試、MAC格式驗證、執行時間估算、增強錯誤處理
 # 輸出：顯示當前配置和預計變更內容，設定workflow變數
 # =============================================================================
 
-- name: FortiGate DHCP Delete Preview For Workflow v3.4
+- name: FortiGate DHCP Delete Preview For Workflow v4.0
   hosts: localhost
   connection: local
-  gather_facts: false
+  gather_facts: true
 
   vars:
     delete_mac: "{{ delete_mac_param }}"
@@ -16,22 +17,65 @@
     fortigate_host: "{{ fortigate_host }}"
     fortigate_token: "{{ fortigate_access_token }}"
     vdom_name: "{{ fortigate_vdom | default('root') }}"
+    api_retries: "{{ fortigate_api_retries | default('3') | int }}"
+    api_delay: "{{ fortigate_api_delay | default('5') | int }}"
+    backup_enabled: "{{ fortigate_backup_enabled | default(true) | bool }}"
     
   tasks:
+    # 記錄開始時間
+    - name: "⏰ Record Start Time"
+      ansible.builtin.set_fact:
+        preview_start_time: "{{ ansible_date_time.epoch }}"
+
     # 參數驗證
     - name: "🔍 Validate Credentials"
       ansible.builtin.fail:
-        msg: "缺少FortiGate Credential參數"
+        msg: "缺少FortiGate Credential參數: {{ missing_params | join(', ') }}"
+      vars:
+        missing_params: "{{ ['fortigate_host', 'fortigate_token'] | select('undefined') | list }}"
       when: fortigate_host is not defined or fortigate_token is not defined
 
-    # 顯示預覽參數（單行格式）
-    - name: "📋 FortiGate DHCP Delete Preview v3.4"
+    # MAC格式驗證
+    - name: "🔍 Validate MAC Address Format"
+      ansible.builtin.set_fact:
+        mac_valid: "{{ delete_mac | regex_search('^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$') is not none }}"
+
+    - name: "❌ Invalid MAC Format"
+      ansible.builtin.fail:
+        msg: "MAC地址格式錯誤: {{ delete_mac }}。正確格式: xx:xx:xx:xx:xx:xx 或 xx-xx-xx-xx-xx-xx"
+      when: not mac_valid
+
+    # 正規化MAC地址格式
+    - name: "🔧 Normalize MAC Address"
+      ansible.builtin.set_fact:
+        normalized_mac: "{{ delete_mac | replace('-', ':') | lower }}"
+
+    # API連線測試
+    - name: "🔌 Test FortiGate API Connection"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/system/global"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_token }}"
+        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
+        status_code: 200
+        timeout: "{{ fortigate_timeout | default('30') | int }}"
+      register: api_test
+      retries: "{{ api_retries }}"
+      delay: "{{ api_delay }}"
+
+    - name: "✅ API Connection Status"
+      ansible.builtin.debug:
+        msg: "✅ API連線成功 | 回應時間: {{ api_test.elapsed }}s | FortiGate版本: {{ api_test.json.results.version | default('未知') }}"
+
+    # 顯示預覽參數
+    - name: "📋 FortiGate DHCP Delete Preview v4.0"
       ansible.builtin.debug:
         msg: "===========================================" 
 
     - name: "📋 Preview Parameters"
       ansible.builtin.debug:
-        msg: "🔍 預覽模式 | 目標MAC: {{ delete_mac }} | DHCP Server: {{ dhcp_server_id }} | Host: {{ fortigate_host }}"
+        msg: "🔍 預覽模式 | 目標MAC: {{ normalized_mac }} | DHCP Server: {{ dhcp_server_id }} | Host: {{ fortigate_host }} | VDOM: {{ vdom_name }}"
 
     # 獲取DHCP配置
     - name: "🔍 Get Current DHCP Reserved Addresses"
@@ -40,11 +84,19 @@
         method: GET
         headers:
           Authorization: "Bearer {{ fortigate_token }}"
-        validate_certs: false
+        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
         status_code: 200
+        timeout: "{{ fortigate_timeout | default('30') | int }}"
       register: existing_reservations
+      retries: "{{ api_retries }}"
+      delay: "{{ api_delay }}"
 
-    # 顯示當前配置（使用loop逐行顯示）
+    # 統計資訊
+    - name: "📊 DHCP Server Statistics"
+      ansible.builtin.debug:
+        msg: "📊 統計 | DHCP Server {{ dhcp_server_id }} | 總配置數: {{ existing_reservations.json.results | length }} | API回應時間: {{ existing_reservations.elapsed }}s"
+
+    # 顯示當前配置
     - name: "📊 Current DHCP Server {{ dhcp_server_id }} Configurations"
       ansible.builtin.debug:
         msg: "📋 當前配置 {{ ansible_loop.index }}/{{ existing_reservations.json.results | length }} - ID: {{ item.id }} | IP: {{ item.ip }} | MAC: {{ item.mac }} | 描述: {{ item.description | default('無') }}"
@@ -65,17 +117,17 @@
       loop: "{{ existing_reservations.json.results }}"
       when:
         - target_object is not defined
-        - item.mac.lower() == delete_mac.lower()
+        - item.mac.lower() == normalized_mac
 
     # MAC未找到時的錯誤處理
     - name: "❌ Target MAC Not Found"
       ansible.builtin.debug:
-        msg: "❌ 未找到MAC: {{ delete_mac }} 在DHCP Server {{ dhcp_server_id }} 中"
+        msg: "❌ 未找到MAC: {{ normalized_mac }} 在DHCP Server {{ dhcp_server_id }} 中"
       when: target_object is not defined
 
     - name: "❌ Available MAC Addresses"
       ansible.builtin.debug:
-        msg: "📋 可用MAC {{ ansible_loop.index }}/{{ existing_reservations.json.results | length }} - {{ item.mac }} (IP: {{ item.ip }})"
+        msg: "📋 可用MAC {{ ansible_loop.index }}/{{ existing_reservations.json.results | length }} - {{ item.mac }} (IP: {{ item.ip }}, 描述: {{ item.description | default('無') }})"
       loop: "{{ existing_reservations.json.results }}"
       loop_control:
         extended: true
@@ -83,9 +135,14 @@
         - target_object is not defined
         - existing_reservations.json.results | length > 0
 
+    - name: "💡 MAC Search Suggestions"
+      ansible.builtin.debug:
+        msg: "💡 建議：請檢查MAC地址格式，或從上方可用MAC清單中選擇正確的MAC地址"
+      when: target_object is not defined
+
     - name: "❌ Stop Execution - MAC Not Found"
       ansible.builtin.fail:
-        msg: "操作終止：未找到指定的MAC地址 {{ delete_mac }}"
+        msg: "操作終止：未找到指定的MAC地址 {{ normalized_mac }}"
       when: target_object is not defined
 
     # 計算還原MAC
@@ -97,7 +154,20 @@
         reserved_mac: "ff:ff:ff:ff:f{{ target_object.ip.split('.')[3][0] }}:{{ target_object.ip.split('.')[3][1:] }}"
       when: target_object is defined
 
-    # 顯示計算過程（分步顯示）
+    # 驗證IP第四碼範圍
+    - name: "🔍 Validate IP Fourth Octet Range"
+      ansible.builtin.set_fact:
+        ip_range_valid: "{{ ip_fourth_octet | int >= 100 and ip_fourth_octet | int <= 250 }}"
+      when: target_object is defined
+
+    - name: "⚠️ IP Range Warning"
+      ansible.builtin.debug:
+        msg: "⚠️ 警告：IP第四碼 {{ ip_fourth_octet }} 不在預期範圍(100-250)內，MAC計算可能不正確"
+      when: 
+        - target_object is defined
+        - not ip_range_valid
+
+    # 顯示計算過程
     - name: "🧮 MAC Calculation Process"
       ansible.builtin.debug:
         msg: "🧮 MAC計算 | IP: {{ target_object.ip }} | 第四碼: {{ ip_fourth_octet }} | 第一位: {{ first_digit }} | 後兩位: {{ last_two_digits }}"
@@ -106,7 +176,53 @@
       ansible.builtin.debug:
         msg: "🔧 MAC格式: ff:ff:ff:ff:f{{ first_digit }}:{{ last_two_digits }} | 結果: {{ reserved_mac }}"
 
-    # 顯示預覽結果（分段顯示）
+    # 檢查是否已是Reserved狀態
+    - name: "🔍 Check if Already Reserved"
+      ansible.builtin.set_fact:
+        already_reserved: "{{ target_object.mac.lower() == reserved_mac and (target_object.description | default('') | lower == 'reserved') }}"
+      when: target_object is defined
+
+    - name: "⚠️ Already Reserved Warning"
+      ansible.builtin.debug:
+        msg: "⚠️ 注意：此配置已經是Reserved狀態，執行操作將不會有任何變更"
+      when: 
+        - target_object is defined
+        - already_reserved
+
+    # 創建備份（如果啟用）
+    - name: "💾 Create Configuration Backup"
+      ansible.builtin.set_fact:
+        backup_info:
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+          original_config:
+            id: "{{ target_object.id }}"
+            ip: "{{ target_object.ip }}"
+            mac: "{{ target_object.mac }}"
+            description: "{{ target_object.description | default('') }}"
+          dhcp_server_id: "{{ dhcp_server_id }}"
+      when: 
+        - target_object is defined
+        - backup_enabled
+
+    - name: "💾 Backup Information"
+      ansible.builtin.debug:
+        msg: "💾 備份 | 時間: {{ backup_info.timestamp }} | 原始配置已記錄"
+      when: 
+        - target_object is defined
+        - backup_enabled
+
+    # 計算執行時間估算
+    - name: "⏱️ Execution Time Estimation"
+      ansible.builtin.set_fact:
+        estimated_execution_time: "{{ (api_test.elapsed + existing_reservations.elapsed) * 2 + 5 }}"
+      when: target_object is defined
+
+    - name: "⏱️ Time Estimation"
+      ansible.builtin.debug:
+        msg: "⏱️ 估算 | 預覽用時: {{ ((ansible_date_time.epoch | int) - (preview_start_time | int)) }}s | 預計執行用時: {{ estimated_execution_time | round(1) }}s"
+      when: target_object is defined
+
+    # 顯示預覽結果
     - name: "✅ Target Configuration Found"
       ansible.builtin.debug:
         msg: "✅ 找到目標MAC配置 ========================================="
@@ -123,12 +239,16 @@
       ansible.builtin.debug:
         msg: "📐 規則 | IP第四碼 {{ ip_fourth_octet }} → MAC ff:ff:ff:ff:f{{ first_digit }}:{{ last_two_digits }} | 描述統一為Reserved"
 
+    - name: "🔄 Change Summary"
+      ansible.builtin.debug:
+        msg: "🔄 異動 | MAC變更: {{ 'YES' if target_object.mac.lower() != reserved_mac else 'NO' }} | 描述變更: {{ 'YES' if (target_object.description | default('') | lower) != 'reserved' else 'NO' }} | 已Reserved: {{ 'YES' if already_reserved else 'NO' }}"
+
     - name: "⚠️ Configuration Change Warning"
       ansible.builtin.debug:
         msg: "⚠️ 警告：此操作將永久修改FortiGate配置！請在Approval Node中仔細確認後再批准執行。"
 
-    # 設定workflow變數
-    - name: "📤 Set Workflow Variables"
+    # 設定workflow變數（增強版）
+    - name: "📤 Set Enhanced Workflow Variables"
       ansible.builtin.set_stats:
         data:
           wf_target_id: "{{ target_object.id }}"
@@ -137,11 +257,17 @@
           wf_reserved_mac: "{{ reserved_mac }}"
           wf_original_desc: "{{ target_object.description | default('') }}"
           wf_server_id: "{{ dhcp_server_id }}"
-          wf_delete_mac: "{{ delete_mac }}"
+          wf_delete_mac: "{{ normalized_mac }}"
           wf_ip_fourth_octet: "{{ ip_fourth_octet }}"
           wf_first_digit: "{{ first_digit }}"
           wf_last_two_digits: "{{ last_two_digits }}"
+          wf_already_reserved: "{{ already_reserved }}"
+          wf_ip_range_valid: "{{ ip_range_valid }}"
+          wf_backup_info: "{{ backup_info | default({}) }}"
+          wf_estimated_time: "{{ estimated_execution_time | default(0) }}"
+          wf_vdom_name: "{{ vdom_name }}"
+          wf_preview_version: "v4.0"
 
     - name: "🎯 Preview Complete"
       ansible.builtin.debug:
-        msg: "🎯 預覽完成 | 等待人工確認 | MAC {{ delete_mac }} → {{ reserved_mac }} | IP {{ target_object.ip }}"
+        msg: "🎯 預覽完成 | 等待人工確認 | MAC {{ normalized_mac }} → {{ reserved_mac }} | IP {{ target_object.ip }} | 版本: v4.0"
