@@ -1,13 +1,12 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address Delete Preview For Workflow Playbook v4.5
+# FortiGate DHCP Reserved Address Delete Preview For Workflow Playbook v4.6
 # 用途：預覽要刪除的MAC配置，計算還原後的MAC地址
-# 優化：API連線測試、MAC格式驗證、增強錯誤處理
-# 修正：徹底解決時間計算類型錯誤問題
+# 修正：FortiGate版本取得方式、優化備份說明
 # 輸出：顯示當前配置和預計變更內容，設定workflow變數
 # =============================================================================
 
-- name: FortiGate DHCP Delete Preview For Workflow v4.5
+- name: FortiGate DHCP Delete Preview For Workflow v4.6
   hosts: localhost
   connection: local
   gather_facts: true
@@ -80,12 +79,15 @@
       retries: "{{ api_retries }}"
       delay: "{{ api_delay }}"
 
+    # FortiGate版本取得（修正版）
     - name: "✅ API Connection Status"
       ansible.builtin.debug:
-        msg: "✅ API連線成功 | FortiGate版本: {{ api_test.json.results.version | default('未知') }}"
+        msg: "✅ API連線成功 | FortiGate版本: {{ fortigate_version }}"
+      vars:
+        fortigate_version: "{{ api_test.json.results.version | default(api_test.json.version | default('未知')) }}"
 
     # 顯示預覽參數
-    - name: "📋 FortiGate DHCP Delete Preview v4.5"
+    - name: "📋 FortiGate DHCP Delete Preview v4.6"
       ansible.builtin.debug:
         msg: "===========================================" 
 
@@ -205,8 +207,8 @@
         - target_object is defined
         - already_reserved
 
-    # 創建備份（如果啟用）
-    - name: "💾 Create Configuration Backup"
+    # 記錄原始配置備份（修正說明）
+    - name: "💾 Record Original Configuration for Backup"
       ansible.builtin.set_fact:
         backup_info:
           timestamp: "{{ ansible_date_time.iso8601 }}"
@@ -216,13 +218,14 @@
             mac: "{{ target_object.mac }}"
             description: "{{ target_object.description | default('') }}"
           dhcp_server_id: "{{ target_dhcp_server_id }}"
+          purpose: "記錄變更前的原始配置，用於回滾參考"
       when: 
         - target_object is defined
         - backup_enabled
 
-    - name: "💾 Backup Information"
+    - name: "💾 Configuration Backup Information"
       ansible.builtin.debug:
-        msg: "💾 備份 | 狀態: {{ '啟用' if backup_enabled else '停用' }} | 時間: {{ backup_info.timestamp | default('無') }}"
+        msg: "💾 配置備份 | 狀態: {{ '已記錄' if backup_enabled else '停用' }} | 用途: 記錄原始配置供回滾參考 | 時間: {{ backup_info.timestamp | default('無') }}"
       when: 
         - target_object is defined
         - backup_enabled
@@ -283,8 +286,8 @@
           wf_ip_range_valid: "{{ ip_range_valid | string }}"
           wf_backup_info: "{{ backup_info | default({}) | to_json }}"
           wf_vdom_name: "{{ fortigate_vdom | default('root') }}"
-          wf_preview_version: "v4.5"
+          wf_preview_version: "v4.6"
 
     - name: "🎯 Preview Complete"
       ansible.builtin.debug:
-        msg: "🎯 預覽完成 | 等待人工確認 | MAC {{ normalized_mac }} → {{ reserved_mac }} | IP {{ target_object.ip }} | 版本: v4.5"
+        msg: "🎯 預覽完成 | 等待人工確認 | MAC {{ normalized_mac }} → {{ reserved_mac }} | IP {{ target_object.ip }} | 版本: v4.6"
