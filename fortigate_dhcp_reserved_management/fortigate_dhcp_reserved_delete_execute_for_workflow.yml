@@ -1,13 +1,14 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address Delete Execute For Workflow Playbook v4.0
+# FortiGate DHCP Reserved Address Delete Execute For Workflow Playbook v4.1
 # 用途：執行實際的MAC刪除操作，將配置還原為Reserved狀態
 # 優化：API連線測試、回滾機制、操作後驗證、增強錯誤處理
+# 修正：解決變數遞迴引用問題
 # 輸入：接收Preview步驟的workflow變數
 # 輸出：執行結果和操作摘要
 # =============================================================================
 
-- name: FortiGate DHCP Delete Execute For Workflow v4.0
+- name: FortiGate DHCP Delete Execute For Workflow v4.1
   hosts: localhost
   connection: local
   gather_facts: true
@@ -31,12 +32,12 @@
     vdom_name: "{{ wf_vdom_name | default('root') }}"
     preview_version: "{{ wf_preview_version | default('unknown') }}"
     
-    # FortiGate連接參數
-    fortigate_host: "{{ fortigate_host }}"
-    fortigate_token: "{{ fortigate_access_token }}"
+    # 連接參數
     api_retries: "{{ fortigate_api_retries | default('3') | int }}"
     api_delay: "{{ fortigate_api_delay | default('5') | int }}"
     backup_enabled: "{{ fortigate_backup_enabled | default(true) | bool }}"
+    connection_timeout: "{{ fortigate_timeout | default('30') | int }}"
+    validate_certs: "{{ fortigate_validate_certs | default(false) | bool }}"
     
   tasks:
     # 記錄開始時間
@@ -49,14 +50,20 @@
       ansible.builtin.fail:
         msg: "從Workflow接收參數失敗！缺少: {{ missing_wf_params | join(', ') }}。此Job Template僅應在Workflow中執行。"
       vars:
-        missing_wf_params: "{{ ['wf_target_id', 'wf_target_ip', 'wf_reserved_mac'] | select('undefined') | list }}"
+        required_wf_params:
+          - wf_target_id
+          - wf_target_ip 
+          - wf_reserved_mac
+        missing_wf_params: "{{ required_wf_params | select('undefined') | list }}"
       when: 
-        - target_id is not defined or target_ip is not defined or reserved_mac is not defined
+        - target_id is not defined or 
+          target_ip is not defined or 
+          reserved_mac is not defined
 
     # 版本相容性檢查
     - name: "🔍 Version Compatibility Check"
       ansible.builtin.debug:
-        msg: "🔍 版本檢查 | Preview版本: {{ preview_version }} | Execute版本: v4.0 | 相容性: {{ '✅' if preview_version == 'v4.0' else '⚠️' }}"
+        msg: "🔍 版本檢查 | Preview版本: {{ preview_version }} | Execute版本: v4.1 | 相容性: {{ '✅' if preview_version == 'v4.1' else '⚠️' }}"
 
     # API連線測試
     - name: "🔌 Test FortiGate API Connection"
@@ -64,10 +71,10 @@
         url: "https://{{ fortigate_host }}/api/v2/cmdb/system/global"
         method: GET
         headers:
-          Authorization: "Bearer {{ fortigate_token }}"
-        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        validate_certs: "{{ validate_certs }}"
         status_code: 200
-        timeout: "{{ fortigate_timeout | default('30') | int }}"
+        timeout: "{{ connection_timeout }}"
       register: api_connection_test
       retries: "{{ api_retries }}"
       delay: "{{ api_delay }}"
@@ -82,10 +89,10 @@
         url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address/{{ target_id }}"
         method: GET
         headers:
-          Authorization: "Bearer {{ fortigate_token }}"
-        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        validate_certs: "{{ validate_certs }}"
         status_code: 200
-        timeout: "{{ fortigate_timeout | default('30') | int }}"
+        timeout: "{{ connection_timeout }}"
       register: pre_execution_config
       retries: "{{ api_retries }}"
       delay: "{{ api_delay }}"
@@ -109,7 +116,7 @@
       when: not config_consistent
 
     # 顯示執行參數
-    - name: "📋 FortiGate DHCP Delete Execute v4.0"
+    - name: "📋 FortiGate DHCP Delete Execute v4.1"
       ansible.builtin.debug:
         msg: "===========================================" 
 
@@ -154,15 +161,15 @@
         url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address/{{ target_id }}"
         method: PUT
         headers:
-          Authorization: "Bearer {{ fortigate_token }}"
+          Authorization: "Bearer {{ fortigate_access_token }}"
         body:
           ip: "{{ target_ip }}"
           mac: "{{ reserved_mac }}"
           description: "Reserved"
         body_format: json
-        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
+        validate_certs: "{{ validate_certs }}"
         status_code: 200
-        timeout: "{{ fortigate_timeout | default('30') | int }}"
+        timeout: "{{ connection_timeout }}"
       register: delete_result
       retries: "{{ api_retries }}"
       delay: "{{ api_delay }}"
@@ -183,10 +190,10 @@
         url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ dhcp_server_id }}/reserved-address/{{ target_id }}"
         method: GET
         headers:
-          Authorization: "Bearer {{ fortigate_token }}"
-        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        validate_certs: "{{ validate_certs }}"
         status_code: 200
-        timeout: "{{ fortigate_timeout | default('30') | int }}"
+        timeout: "{{ connection_timeout }}"
       register: post_execution_config
       retries: "{{ api_retries }}"
       delay: "{{ api_delay }}"
@@ -206,3 +213,43 @@
         - post_execution_config.json is defined
 
     - name: "✅ Configuration Verification"
+      ansible.builtin.debug:
+        msg: "{{ '✅ 配置驗證通過' if verification_passed | default(false) else '⚠️ 配置驗證警告' }} | 當前MAC: {{ post_execution_config.json.results.mac | default('未知') }} | 當前描述: {{ post_execution_config.json.results.description | default('未知') }}"
+      when: post_execution_config is defined
+
+    # 成功結果顯示
+    - name: "🎉 Operation Success Status"
+      ansible.builtin.debug:
+        msg: "✅ MAC刪除操作成功 | HTTP狀態: {{ delete_result.status }} | 跳過執行: {{ delete_result.skipped | default(false) }}"
+      when: 
+        - delete_result is defined
+        - delete_result.status == 200
+
+    - name: "🎉 Configuration Changes"
+      ansible.builtin.debug:
+        msg: "🎉 變更完成 | ID: {{ target_id }} | IP: {{ target_ip }} | MAC: {{ original_mac }}→{{ reserved_mac }} | 描述: Reserved"
+      when: 
+        - delete_result is defined
+        - delete_result.status == 200
+
+    # 失敗結果顯示
+    - name: "❌ Operation Failed"
+      ansible.builtin.debug:
+        msg: "❌ MAC刪除操作失敗 | HTTP狀態: {{ delete_result.status | default('未知') }} | 錯誤: {{ delete_result.msg | default('未知') }}"
+      when: 
+        - delete_result is defined 
+        - delete_result.status != 200
+
+    # 計算執行時間
+    - name: "⏱️ Execution Time Calculation"
+      ansible.builtin.set_fact:
+        actual_execution_time: "{{ ((ansible_date_time.epoch | int) - (execution_start_time | int)) }}"
+
+    # 最終摘要
+    - name: "📊 Workflow Summary"
+      ansible.builtin.debug:
+        msg: "=========================================="
+
+    - name: "📊 Final Result"
+      ansible.builtin.debug:
+        msg: "📊 最終結果 | MAC
