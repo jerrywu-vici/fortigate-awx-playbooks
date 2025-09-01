@@ -1,13 +1,13 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address Delete + Firewall Address Delete Preview v5.2
+# FortiGate DHCP Reserved Address Delete + Firewall Address Delete Preview v5.3
 # 用途：預覽要刪除的MAC配置（DHCP + Firewall Address）
 # 功能：1. DHCP MAC還原為Reserved 2. Firewall Address從Group移除並刪除
-# 修正：正確處理FortiGate API中macaddr巢狀結構
+# 修正：處理Address Group API回傳list格式問題
 # 輸出：顯示DHCP和Firewall兩個功能的變更預覽，設定workflow變數
 # =============================================================================
 
-- name: FortiGate DHCP + Firewall Delete Preview For Workflow v5.2
+- name: FortiGate DHCP + Firewall Delete Preview For Workflow v5.3
   hosts: localhost
   connection: local
   gather_facts: true
@@ -112,7 +112,7 @@
         fortigate_version: "{{ api_test.json.results.version | default(api_test.json.version | default('未知')) }}"
 
     # 顯示預覽參數
-    - name: "📋 FortiGate DHCP + Firewall Delete Preview v5.2"
+    - name: "📋 FortiGate DHCP + Firewall Delete Preview v5.3"
       ansible.builtin.debug:
         msg: "===========================================" 
 
@@ -193,11 +193,6 @@
       retries: "{{ api_retries }}"
       delay: "{{ api_delay }}"
 
-    # 顯示Firewall Addresses調試資訊
-    - name: "🔍 Debug Firewall Addresses Structure"
-      ansible.builtin.debug:
-        msg: "🔍 調試 | Address數量: {{ firewall_addresses.json.results | length }} | 目標MAC: {{ normalized_mac }}"
-
     # 搜尋目標MAC對應的Address Object（修正版）
     - name: "🔍 Search for Target MAC in Firewall Addresses"
       ansible.builtin.set_fact:
@@ -227,27 +222,6 @@
         msg: "⚠️ Firewall中未找到MAC: {{ normalized_mac }} 對應的Address Object（名稱需以MAC_開頭），將跳過Firewall操作"
       when: firewall_target_object is not defined
 
-    # 顯示所有MAC_開頭的Address以供調試
-    - name: "🔍 List All MAC_ Addresses for Debug"
-      ansible.builtin.debug:
-        msg: "🔍 MAC_地址 {{ ansible_loop.index }}/{{ mac_addresses | length }} | Name: {{ item.name }} | MAC: {{ actual_mac }} | 目標MAC: {{ normalized_mac }} | 匹配: {{ (actual_mac | lower) == normalized_mac }}"
-      loop: "{{ mac_addresses }}"
-      loop_control:
-        extended: true
-      vars:
-        mac_addresses: "{{ firewall_addresses.json.results | selectattr('name', 'defined') | selectattr('name', 'match', '^MAC_.*') | list }}"
-        actual_mac: >-
-          {%- if item.macaddr is string -%}
-            {{ item.macaddr }}
-          {%- elif item.macaddr is iterable and item.macaddr | length > 0 -%}
-            {{ item.macaddr[0].macaddr }}
-          {%- else -%}
-            N/A
-          {%- endif -%}
-      when: 
-        - firewall_target_object is not defined
-        - mac_addresses | length > 0
-
     # Firewall Address找到時的預覽
     - name: "📊 Firewall Target Address Found"
       ansible.builtin.debug:
@@ -269,27 +243,49 @@
       delay: "{{ api_delay }}"
       when: firewall_target_object is defined
 
-    # 檢查Address是否在Group中
-    - name: "🔍 Check Address in Group"
-      ansible.builtin.set_fact:
-        address_in_group: "{{ firewall_target_object.name in address_group_config.json.results.member }}"
-        original_group_members: "{{ address_group_config.json.results.member }}"
-        updated_group_members: "{{ address_group_config.json.results.member | difference([firewall_target_object.name]) }}"
+    # 調試Address Group結構
+    - name: "🔍 Debug Address Group Structure"
+      ansible.builtin.debug:
+        msg: "🔍 Address Group調試 | 回應類型: {{ address_group_config.json.results | type_debug }} | 第一個元素: {{ (address_group_config.json.results | first) if address_group_config.json.results | length > 0 else '無資料' }}"
       when: 
         - firewall_target_object is defined
         - address_group_config is defined
 
+    # 檢查Address是否在Group中（修正版）
+    - name: "🔍 Check Address in Group"
+      ansible.builtin.set_fact:
+        group_data: "{{ address_group_config.json.results | first }}"
+        address_in_group: "{{ firewall_target_object.name in (address_group_config.json.results | first).member }}"
+        original_group_members: "{{ (address_group_config.json.results | first).member }}"
+        updated_group_members: "{{ (address_group_config.json.results | first).member | difference([firewall_target_object.name]) }}"
+      when: 
+        - firewall_target_object is defined
+        - address_group_config is defined
+        - address_group_config.json.results | length > 0
+
     - name: "📊 Address Group Current Status"
       ansible.builtin.debug:
         msg: "📊 Address Group | 名稱: {{ target_address_group }} | 目標Address在Group中: {{ 'YES' if address_in_group else 'NO' }} | 當前Members數: {{ original_group_members | length }}"
-      when: firewall_target_object is defined
+      when: 
+        - firewall_target_object is defined
+        - group_data is defined
 
     - name: "🔄 Address Group After Remove"
       ansible.builtin.debug:
         msg: "🔄 移除後 | Group: {{ target_address_group }} | 移除Member: {{ firewall_target_object.name }} | 剩餘Members數: {{ updated_group_members | length }}"
       when: 
         - firewall_target_object is defined
+        - address_in_group is defined
         - address_in_group
+
+    # Address Group 不存在的處理
+    - name: "⚠️ Address Group Not Found"
+      ansible.builtin.debug:
+        msg: "⚠️ Address Group {{ target_address_group }} 不存在或無法存取"
+      when: 
+        - firewall_target_object is defined
+        - address_group_config is defined
+        - address_group_config.json.results | length == 0
 
     # ==================== 整合預覽總結 ====================
     - name: "📊 Integrated Preview Summary"
@@ -298,7 +294,7 @@
 
     - name: "📊 Operations Summary"
       ansible.builtin.debug:
-        msg: "📊 操作總覽 | DHCP操作: {{ 'YES' if dhcp_target_object is defined else 'SKIP' }} | Firewall操作: {{ 'YES' if firewall_target_object is defined else 'SKIP' }} | Address在Group中: {{ 'YES' if (firewall_target_object is defined and address_in_group) else 'NO' }}"
+        msg: "📊 操作總覽 | DHCP操作: {{ 'YES' if dhcp_target_object is defined else 'SKIP' }} | Firewall操作: {{ 'YES' if firewall_target_object is defined else 'SKIP' }} | Address在Group中: {{ 'YES' if (firewall_target_object is defined and address_in_group is defined and address_in_group) else 'NO' }}"
 
     # 記錄原始配置備份
     - name: "💾 Record Original Configuration for Backup"
@@ -359,8 +355,8 @@
           wf_server_info: "{{ server_info | to_json }}"
           wf_backup_info: "{{ integrated_backup_info | default({}) | to_json }}"
           wf_vdom_name: "{{ fortigate_vdom | default('root') }}"
-          wf_preview_version: "v5.2"
+          wf_preview_version: "v5.3"
 
     - name: "🎯 Integrated Preview Complete"
       ansible.builtin.debug:
-        msg: "🎯 整合預覽完成 | 等待人工確認 | MAC {{ normalized_mac }} | DHCP: {{ 'YES' if dhcp_target_object is defined else 'SKIP' }} | Firewall: {{ 'YES' if firewall_target_object is defined else 'SKIP' }} | 版本: v5.2"
+        msg: "🎯 整合預覽完成 | 等待人工確認 | MAC {{ normalized_mac }} | DHCP: {{ 'YES' if dhcp_target_object is defined else 'SKIP' }} | Firewall: {{ 'YES' if firewall_target_object is defined else 'SKIP' }} | 版本: v5.3"
