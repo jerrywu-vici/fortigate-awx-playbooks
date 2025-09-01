@@ -288,7 +288,7 @@
     # 最終警告
     - name: "⚠️ Configuration Change Warning"
       ansible.builtin.debug:
-        msg: "⚠️ 警告：此操作將永久修改FortiGate的DHCP和Firewall配置！請在Approval Node中仔細確認後再批
+        msg: "⚠️ 警告：此操作將永久修改FortiGate的DHCP和Firewall配置！請在Approval Node中仔細確認後再批准執行。"
 
     # 設定workflow變數（整合版）
     - name: "📤 Set Integrated Workflow Variables"
@@ -304,7 +304,6 @@
           wf_ip_fourth_octet: "{{ ip_fourth_octet | default('') }}"
           wf_first_digit: "{{ first_digit | default('') }}"
           wf_last_two_digits: "{{ last_two_digits | default('') }}"
-          
           # Firewall 相關變數
           wf_firewall_enabled: "{{ firewall_target_object is defined }}"
           wf_firewall_address_name: "{{ firewall_target_object.name | default('') }}"
@@ -314,7 +313,6 @@
           wf_address_in_group: "{{ address_in_group | default(false) }}"
           wf_original_group_members: "{{ original_group_members | default([]) | to_json }}"
           wf_updated_group_members: "{{ updated_group_members | default([]) | to_json }}"
-          
           # 共用變數
           wf_server_id: "{{ target_dhcp_server_id }}"
           wf_delete_mac: "{{ normalized_mac }}"
@@ -326,4 +324,3 @@
     - name: "🎯 Integrated Preview Complete"
       ansible.builtin.debug:
         msg: "🎯 整合預覽完成 | 等待人工確認 | MAC {{ normalized_mac }} | DHCP: {{ 'YES' if dhcp_target_object is defined else 'SKIP' }} | Firewall: {{ 'YES' if firewall_target_object is defined else 'SKIP' }} | 版本: v5.0"
-        
