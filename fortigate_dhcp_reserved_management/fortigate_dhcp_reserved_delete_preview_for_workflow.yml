@@ -3,7 +3,7 @@
 # FortiGate DHCP Reserved Address Delete + Firewall Address Delete Preview v5.4
 # 用途：預覽要刪除的MAC配置（DHCP + Firewall Address）
 # 功能：1. DHCP MAC還原為Reserved 2. Firewall Address從Group移除並刪除
-# 修正：Address Group成員檢查邏輯、加強調試輸出
+# 修正：Address Group member 檢查邏輯，確保執行順序正確
 # 輸出：顯示DHCP和Firewall兩個功能的變更預覽，設定workflow變數
 # =============================================================================
 
@@ -200,6 +200,7 @@
         found_macaddr: "{{ actual_macaddr }}"
       loop: "{{ firewall_addresses.json.results }}"
       vars:
+        # 正確處理macaddr的巢狀結構：macaddr: [{'macaddr': 'xx:xx:xx:xx:xx:xx'}]
         actual_macaddr: >-
           {%- if item.macaddr is string -%}
             {{ item.macaddr }}
@@ -242,66 +243,60 @@
       delay: "{{ api_delay }}"
       when: firewall_target_object is defined
 
-    # 調試Address Group成員列表
-    - name: "🔍 Debug Address Group Members"
+    # 調試Address Group結構
+    - name: "🔍 Debug Address Group Structure"
       ansible.builtin.debug:
-        msg: "🔍 Group成員調試 | Group: {{ target_address_group }} | 所有成員: {{ group_members }} | 目標Address: {{ firewall_target_object.name }} | 是否包含: {{ firewall_target_object.name in group_members }}"
+        msg: "🔍 Address Group調試 | Group: {{ target_address_group }} | 回應結構: {{ address_group_config.json.results | type_debug }} | Members: {{ group_members }}"
       vars:
-        group_members: "{{ (address_group_config.json.results | first).member }}"
+        group_members: "{{ (address_group_config.json.results | first).member if address_group_config.json.results | length > 0 else [] }}"
       when: 
         - firewall_target_object is defined
         - address_group_config is defined
-        - address_group_config.json.results | length > 0
 
     # 檢查Address是否在Group中（修正版）
     - name: "🔍 Check Address in Group"
       ansible.builtin.set_fact:
         group_data: "{{ address_group_config.json.results | first }}"
-        current_group_members: "{{ (address_group_config.json.results | first).member }}"
+        current_members: "{{ (address_group_config.json.results | first).member }}"
+        address_in_group: "{{ firewall_target_object.name in (address_group_config.json.results | first).member }}"
+        original_group_members: "{{ (address_group_config.json.results | first).member }}"
+        updated_group_members: "{{ (address_group_config.json.results | first).member | difference([firewall_target_object.name]) }}"
       when: 
         - firewall_target_object is defined
         - address_group_config is defined
         - address_group_config.json.results | length > 0
 
-    # 設定成員相關變數
-    - name: "🔧 Set Group Member Variables"
-      ansible.builtin.set_fact:
-        address_in_group: "{{ firewall_target_object.name in current_group_members }}"
-        original_group_members: "{{ current_group_members }}"
-        updated_group_members: "{{ current_group_members | difference([firewall_target_object.name]) }}"
+    # 顯示詳細的Address檢查資訊
+    - name: "🔍 Debug Address Membership Check"
+      ansible.builtin.debug:
+        msg: "🔍 詳細檢查 | Target: {{ firewall_target_object.name }} | Members: {{ current_members }} | 是否包含: {{ firewall_target_object.name in current_members }}"
       when: 
         - firewall_target_object is defined
-        - current_group_members is defined
+        - current_members is defined
 
     - name: "📊 Address Group Current Status"
       ansible.builtin.debug:
-        msg: "📊 Address Group | 名稱: {{ target_address_group }} | 目標Address在Group中: {{ 'YES' if address_in_group else 'NO' }} | 當前Members數: {{ original_group_members | length }} | 目標: {{ firewall_target_object.name }}"
+        msg: "📊 Address Group | 名稱: {{ target_address_group }} | 目標Address在Group中: {{ 'YES' if address_in_group else 'NO' }} | 當前Members數: {{ original_group_members | length }} | Members: {{ original_group_members | join(', ') }}"
       when: 
         - firewall_target_object is defined
-        - original_group_members is defined
-
-    - name: "📋 Current Group Members"
-      ansible.builtin.debug:
-        msg: "📋 當前Members: {{ original_group_members | join(', ') }}"
-      when: 
-        - firewall_target_object is defined
-        - original_group_members is defined
+        - group_data is defined
 
     - name: "🔄 Address Group After Remove"
       ansible.builtin.debug:
-        msg: "🔄 移除後 | Group: {{ target_address_group }} | 移除Member: {{ firewall_target_object.name }} | 剩餘Members數: {{ updated_group_members | length }}"
+        msg: "🔄 移除後 | Group: {{ target_address_group }} | 移除Member: {{ firewall_target_object.name }} | 剩餘Members數: {{ updated_group_members | length }} | 剩餘Members: {{ updated_group_members | join(', ') }}"
       when: 
         - firewall_target_object is defined
         - address_in_group is defined
         - address_in_group
 
-    - name: "📋 Updated Group Members"
+    # Address 不在 Group 中的情況
+    - name: "ℹ️ Address Not in Group"
       ansible.builtin.debug:
-        msg: "📋 更新後Members: {{ updated_group_members | join(', ') }}"
+        msg: "ℹ️ Address {{ firewall_target_object.name }} 不在 Group {{ target_address_group }} 中，跳過Group更新"
       when: 
         - firewall_target_object is defined
         - address_in_group is defined
-        - address_in_group
+        - not address_in_group
 
     # Address Group 不存在的處理
     - name: "⚠️ Address Group Not Found"
@@ -319,7 +314,7 @@
 
     - name: "📊 Operations Summary"
       ansible.builtin.debug:
-        msg: "📊 操作總覽 | DHCP操作: {{ 'YES' if dhcp_target_object is defined else 'SKIP' }} | Firewall操作: {{ 'YES' if firewall_target_object is defined else 'SKIP' }} | Address在Group中: {{ 'YES' if (address_in_group is defined and address_in_group) else 'NO' }}"
+        msg: "📊 操作總覽 | DHCP操作: {{ 'YES' if dhcp_target_object is defined else 'SKIP' }} | Firewall操作: {{ 'YES' if firewall_target_object is defined else 'SKIP' }} | Address在Group中: {{ 'YES' if (firewall_target_object is defined and address_in_group is defined and address_in_group) else 'NO' }}"
 
     # 記錄原始配置備份
     - name: "💾 Record Original Configuration for Backup"
