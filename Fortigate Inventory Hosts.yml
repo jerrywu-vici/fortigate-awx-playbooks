@@ -1,0 +1,15 @@
+# FortiGate 連接參數
+ansible_connection: httpapi
+ansible_network_os: fortinet.fortios.fortios
+ansible_httpapi_use_ssl: true
+ansible_httpapi_port: "{{ fortigate_api_port | default('443') }}"
+ansible_httpapi_timeout: "{{ fortigate_timeout | default('30') }}"
+
+# 自動注入參數（由credential提供）
+ansible_host: "{{ fortigate_host }}"
+ansible_httpapi_validate_certs: "{{ fortigate_validate_certs | default(false) }}"
+
+# 優化連線參數
+ansible_python_interpreter: /usr/bin/python3
+ansible_httpapi_session_timeout: 300
+ansible_command_timeout: "{{ fortigate_timeout | default('30') }}"
