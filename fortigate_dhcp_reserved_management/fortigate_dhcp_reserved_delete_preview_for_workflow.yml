@@ -190,7 +190,7 @@
         method: GET
         headers:
           Authorization: "Bearer {{ fortigate_access_token }}"
-        validate_crets: "{{ validate_certs }}"
+        validate_certs: "{{ validate_certs }}"
         status_code: 200
         timeout: "{{ connection_timeout }}"
       register: firewall_addresses
