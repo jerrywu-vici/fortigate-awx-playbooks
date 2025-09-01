@@ -1,13 +1,13 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address Delete + Firewall Address Delete Preview v5.1
+# FortiGate DHCP Reserved Address Delete + Firewall Address Delete Preview v5.2
 # 用途：預覽要刪除的MAC配置（DHCP + Firewall Address）
 # 功能：1. DHCP MAC還原為Reserved 2. Firewall Address從Group移除並刪除
-# 修正：處理FortiGate API中macaddr為list類型的問題
+# 修正：正確處理FortiGate API中macaddr巢狀結構
 # 輸出：顯示DHCP和Firewall兩個功能的變更預覽，設定workflow變數
 # =============================================================================
 
-- name: FortiGate DHCP + Firewall Delete Preview For Workflow v5.1
+- name: FortiGate DHCP + Firewall Delete Preview For Workflow v5.2
   hosts: localhost
   connection: local
   gather_facts: true
@@ -112,7 +112,7 @@
         fortigate_version: "{{ api_test.json.results.version | default(api_test.json.version | default('未知')) }}"
 
     # 顯示預覽參數
-    - name: "📋 FortiGate DHCP + Firewall Delete Preview v5.1"
+    - name: "📋 FortiGate DHCP + Firewall Delete Preview v5.2"
       ansible.builtin.debug:
         msg: "===========================================" 
 
@@ -196,8 +196,7 @@
     # 顯示Firewall Addresses調試資訊
     - name: "🔍 Debug Firewall Addresses Structure"
       ansible.builtin.debug:
-        msg: "🔍 調試 | Address數量: {{ firewall_addresses.json.results | length }} | 第一個Address結構: {{ firewall_addresses.json.results[0] | default('無資料') }}"
-      when: firewall_addresses.json.results | length > 0
+        msg: "🔍 調試 | Address數量: {{ firewall_addresses.json.results | length }} | 目標MAC: {{ normalized_mac }}"
 
     # 搜尋目標MAC對應的Address Object（修正版）
     - name: "🔍 Search for Target MAC in Firewall Addresses"
@@ -206,8 +205,15 @@
         found_macaddr: "{{ actual_macaddr }}"
       loop: "{{ firewall_addresses.json.results }}"
       vars:
-        # 處理macaddr可能是字串或列表的情況
-        actual_macaddr: "{{ item.macaddr if item.macaddr is string else (item.macaddr | first if item.macaddr | length > 0 else '') }}"
+        # 正確處理macaddr的巢狀結構：macaddr: [{'macaddr': 'xx:xx:xx:xx:xx:xx'}]
+        actual_macaddr: >-
+          {%- if item.macaddr is string -%}
+            {{ item.macaddr }}
+          {%- elif item.macaddr is iterable and item.macaddr | length > 0 -%}
+            {{ item.macaddr[0].macaddr }}
+          {%- else -%}
+            
+          {%- endif -%}
       when:
         - firewall_target_object is not defined
         - item.name is defined
@@ -224,13 +230,20 @@
     # 顯示所有MAC_開頭的Address以供調試
     - name: "🔍 List All MAC_ Addresses for Debug"
       ansible.builtin.debug:
-        msg: "🔍 MAC_地址 {{ ansible_loop.index }}/{{ mac_addresses | length }} | Name: {{ item.name }} | MAC: {{ actual_mac }} | Type: {{ item.type }}"
+        msg: "🔍 MAC_地址 {{ ansible_loop.index }}/{{ mac_addresses | length }} | Name: {{ item.name }} | MAC: {{ actual_mac }} | 目標MAC: {{ normalized_mac }} | 匹配: {{ (actual_mac | lower) == normalized_mac }}"
       loop: "{{ mac_addresses }}"
       loop_control:
         extended: true
       vars:
         mac_addresses: "{{ firewall_addresses.json.results | selectattr('name', 'defined') | selectattr('name', 'match', '^MAC_.*') | list }}"
-        actual_mac: "{{ item.macaddr if item.macaddr is string else (item.macaddr | first if item.macaddr | length > 0 else 'N/A') }}"
+        actual_mac: >-
+          {%- if item.macaddr is string -%}
+            {{ item.macaddr }}
+          {%- elif item.macaddr is iterable and item.macaddr | length > 0 -%}
+            {{ item.macaddr[0].macaddr }}
+          {%- else -%}
+            N/A
+          {%- endif -%}
       when: 
         - firewall_target_object is not defined
         - mac_addresses | length > 0
@@ -346,8 +359,8 @@
           wf_server_info: "{{ server_info | to_json }}"
           wf_backup_info: "{{ integrated_backup_info | default({}) | to_json }}"
           wf_vdom_name: "{{ fortigate_vdom | default('root') }}"
-          wf_preview_version: "v5.1"
+          wf_preview_version: "v5.2"
 
     - name: "🎯 Integrated Preview Complete"
       ansible.builtin.debug:
-        msg: "🎯 整合預覽完成 | 等待人工確認 | MAC {{ normalized_mac }} | DHCP: {{ 'YES' if dhcp_target_object is defined else 'SKIP' }} | Firewall: {{ 'YES' if firewall_target_object is defined else 'SKIP' }} | 版本: v5.1"
+        msg: "🎯 整合預覽完成 | 等待人工確認 | MAC {{ normalized_mac }} | DHCP: {{ 'YES' if dhcp_target_object is defined else 'SKIP' }} | Firewall: {{ 'YES' if firewall_target_object is defined else 'SKIP' }} | 版本: v5.2"
