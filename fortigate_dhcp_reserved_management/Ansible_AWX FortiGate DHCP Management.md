@@ -134,30 +134,6 @@ MAC 格式: ff:ff:ff:ff:fX:XX
 
 ### Firewall Address Delete Workflow
 
-#### 2.4 Address Group 處理
-目標環境中的 Address Groups:
-```bash
-config firewall addrgrp
-    edit "Group_22_FIC_Allow-MAC"
-        set member "MAC_Chiachi_NB_WLAN" "MAC_Barz_NB_WLAN" "MAC_Ian.su_NB_WLAN"
-    next
-    edit "Group_40_PC-Allow-MAC"
-        set member "MAC_test_PC_WLAN" "MAC_other_device"
-    next
-end
-```
-
-#### 2.5 Address 物件格式
-```bash
-config firewall address
-    edit "MAC_test_PC_WLAN"
-        set type mac
-        set comment "172.23.22.170"
-        set macaddr "00:11:22:33:44:55"
-    next
-end
-```
-
 ## 📋 Job Templates 設定
 
 ### 3.1 DHCP Reserved Delete Templates
