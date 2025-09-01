@@ -1,12 +1,13 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address Delete + Firewall Address Delete Preview v5.0
+# FortiGate DHCP Reserved Address Delete + Firewall Address Delete Preview v5.1
 # 用途：預覽要刪除的MAC配置（DHCP + Firewall Address）
 # 功能：1. DHCP MAC還原為Reserved 2. Firewall Address從Group移除並刪除
+# 修正：處理FortiGate API中macaddr為list類型的問題
 # 輸出：顯示DHCP和Firewall兩個功能的變更預覽，設定workflow變數
 # =============================================================================
 
-- name: FortiGate DHCP + Firewall Delete Preview For Workflow v5.0
+- name: FortiGate DHCP + Firewall Delete Preview For Workflow v5.1
   hosts: localhost
   connection: local
   gather_facts: true
@@ -111,7 +112,7 @@
         fortigate_version: "{{ api_test.json.results.version | default(api_test.json.version | default('未知')) }}"
 
     # 顯示預覽參數
-    - name: "📋 FortiGate DHCP + Firewall Delete Preview v5.0"
+    - name: "📋 FortiGate DHCP + Firewall Delete Preview v5.1"
       ansible.builtin.debug:
         msg: "===========================================" 
 
@@ -192,15 +193,27 @@
       retries: "{{ api_retries }}"
       delay: "{{ api_delay }}"
 
-    # 搜尋目標MAC對應的Address Object
+    # 顯示Firewall Addresses調試資訊
+    - name: "🔍 Debug Firewall Addresses Structure"
+      ansible.builtin.debug:
+        msg: "🔍 調試 | Address數量: {{ firewall_addresses.json.results | length }} | 第一個Address結構: {{ firewall_addresses.json.results[0] | default('無資料') }}"
+      when: firewall_addresses.json.results | length > 0
+
+    # 搜尋目標MAC對應的Address Object（修正版）
     - name: "🔍 Search for Target MAC in Firewall Addresses"
       ansible.builtin.set_fact:
         firewall_target_object: "{{ item }}"
+        found_macaddr: "{{ actual_macaddr }}"
       loop: "{{ firewall_addresses.json.results }}"
+      vars:
+        # 處理macaddr可能是字串或列表的情況
+        actual_macaddr: "{{ item.macaddr if item.macaddr is string else (item.macaddr | first if item.macaddr | length > 0 else '') }}"
       when:
         - firewall_target_object is not defined
+        - item.name is defined
         - item.name.startswith('MAC_')
-        - item.macaddr.lower() == normalized_mac
+        - item.macaddr is defined
+        - actual_macaddr | lower == normalized_mac
 
     # Firewall Address未找到的處理
     - name: "⚠️ Firewall Target Address Not Found"
@@ -208,10 +221,24 @@
         msg: "⚠️ Firewall中未找到MAC: {{ normalized_mac }} 對應的Address Object（名稱需以MAC_開頭），將跳過Firewall操作"
       when: firewall_target_object is not defined
 
+    # 顯示所有MAC_開頭的Address以供調試
+    - name: "🔍 List All MAC_ Addresses for Debug"
+      ansible.builtin.debug:
+        msg: "🔍 MAC_地址 {{ ansible_loop.index }}/{{ mac_addresses | length }} | Name: {{ item.name }} | MAC: {{ actual_mac }} | Type: {{ item.type }}"
+      loop: "{{ mac_addresses }}"
+      loop_control:
+        extended: true
+      vars:
+        mac_addresses: "{{ firewall_addresses.json.results | selectattr('name', 'defined') | selectattr('name', 'match', '^MAC_.*') | list }}"
+        actual_mac: "{{ item.macaddr if item.macaddr is string else (item.macaddr | first if item.macaddr | length > 0 else 'N/A') }}"
+      when: 
+        - firewall_target_object is not defined
+        - mac_addresses | length > 0
+
     # Firewall Address找到時的預覽
     - name: "📊 Firewall Target Address Found"
       ansible.builtin.debug:
-        msg: "📊 Firewall目標 | Name: {{ firewall_target_object.name }} | MAC: {{ firewall_target_object.macaddr }} | Comment: {{ firewall_target_object.comment | default('無') }}"
+        msg: "📊 Firewall目標 | Name: {{ firewall_target_object.name }} | MAC: {{ found_macaddr }} | Comment: {{ firewall_target_object.comment | default('無') }}"
       when: firewall_target_object is defined
 
     # 獲取Address Group配置
@@ -307,7 +334,7 @@
           # Firewall 相關變數
           wf_firewall_enabled: "{{ firewall_target_object is defined }}"
           wf_firewall_address_name: "{{ firewall_target_object.name | default('') }}"
-          wf_firewall_address_mac: "{{ firewall_target_object.macaddr | default('') }}"
+          wf_firewall_address_mac: "{{ found_macaddr | default('') }}"
           wf_firewall_address_comment: "{{ firewall_target_object.comment | default('') }}"
           wf_address_group_name: "{{ target_address_group }}"
           wf_address_in_group: "{{ address_in_group | default(false) }}"
@@ -319,8 +346,8 @@
           wf_server_info: "{{ server_info | to_json }}"
           wf_backup_info: "{{ integrated_backup_info | default({}) | to_json }}"
           wf_vdom_name: "{{ fortigate_vdom | default('root') }}"
-          wf_preview_version: "v5.0"
+          wf_preview_version: "v5.1"
 
     - name: "🎯 Integrated Preview Complete"
       ansible.builtin.debug:
-        msg: "🎯 整合預覽完成 | 等待人工確認 | MAC {{ normalized_mac }} | DHCP: {{ 'YES' if dhcp_target_object is defined else 'SKIP' }} | Firewall: {{ 'YES' if firewall_target_object is defined else 'SKIP' }} | 版本: v5.0"
+        msg: "🎯 整合預覽完成 | 等待人工確認 | MAC {{ normalized_mac }} | DHCP: {{ 'YES' if dhcp_target_object is defined else 'SKIP' }} | Firewall: {{ 'YES' if firewall_target_object is defined else 'SKIP' }} | 版本: v5.1"
