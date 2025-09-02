@@ -248,7 +248,7 @@
         - needs_operation
         - (create_result.status == 200 if operation_type == 'CREATE' else update_result.status == 200)
 
-- name: "✅ Operation Verification Result"
+    - name: "✅ Operation Verification Result"
       ansible.builtin.debug:
         msg: "✅ 操作驗證通過 | 找到配置: {{ post_verification.json.results | length }} 筆 | 當前MAC: {{ (post_verification.json.results | first).mac }} | 當前描述: {{ (post_verification.json.results | first).description }}"
       when: 
