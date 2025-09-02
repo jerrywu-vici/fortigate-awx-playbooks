@@ -1,14 +1,15 @@
+---
 # =============================================================================
-# FortiGate DHCP Reserved Address Delete + Firewall Address Delete Execute v5.1
+# FortiGate DHCP Reserved Address Delete + Firewall Address Delete Execute v6.0
 # 用途：執行實際的MAC刪除操作（DHCP + Firewall Address）
 # 功能：1. DHCP MAC還原為Reserved 2. Firewall Address從Group移除並刪除
-# 修正：確保執行順序 - 先移除 Address Group Member，再刪除 Address
-# 執行順序：DHCP → Address Group移除 → Address Object刪除
+# 執行順序：DHCP還原 → Address Group移除 → Address Object刪除
 # 輸入：接收Preview步驟的workflow變數（包含DHCP和Firewall資訊）
 # 輸出：執行結果和操作摘要
+# 版本：v6.0 - 優化代碼結構，統一版本號
 # =============================================================================
 
-- name: FortiGate DHCP Reserved Delete Execute For Workflow v5.1
+- name: FortiGate DHCP Reserved Delete Execute For Workflow v6.0
   hosts: localhost
   connection: local
   gather_facts: true
@@ -53,7 +54,7 @@
     validate_certs: "{{ fortigate_validate_certs | default(false) | bool }}"
     
   tasks:
-    # Workflow參數驗證
+    # ==================== 參數驗證區塊 ====================
     - name: "🔍 Validate Workflow Parameters"
       ansible.builtin.fail:
         msg: "從Workflow接收參數失敗！缺少關鍵參數。此Job Template僅應在Workflow中執行。"
@@ -62,15 +63,14 @@
           delete_mac is not defined or
           preview_version is not defined
 
-    # FortiGate Credential驗證
-    - name: "🔍 Validate Credentials"
+    - name: "🔍 Validate FortiGate Credentials"
       ansible.builtin.fail:
         msg: "缺少FortiGate Credential參數！請確認Job Template已正確設定Credential。"
       when: 
         - fortigate_host is not defined or 
           fortigate_access_token is not defined
 
-    # API連線測試
+    # ==================== API 連接驗證 ====================
     - name: "🔌 Test FortiGate API Connection"
       ansible.builtin.uri:
         url: "https://{{ fortigate_host }}/api/v2/cmdb/system/global"
@@ -84,33 +84,31 @@
       retries: "{{ api_retries }}"
       delay: "{{ api_delay }}"
 
-    - name: "✅ API Connection Status"
+    - name: "✅ API Connection Established"
       ansible.builtin.debug:
         msg: "✅ API連線成功 | FortiGate版本: {{ fortigate_version }}"
       vars:
         fortigate_version: "{{ api_connection_test.json.results.version | default(api_connection_test.json.version | default('未知')) }}"
 
-    # 顯示執行參數
-    - name: "📋 FortiGate DHCP + Firewall Delete Execute v5.1"
+    # ==================== 執行資訊顯示 ====================
+    - name: "📋 Execution Information Header"
       ansible.builtin.debug:
-        msg: "===========================================" 
+        msg: "==================== FortiGate DHCP + Firewall Delete Execute v6.0 ===================="
 
-    - name: "🚀 Execute Parameters"
+    - name: "🚀 Execute Parameters Summary"
       ansible.builtin.debug:
         msg: "🚀 整合執行模式 | 已通過人工確認 | MAC: {{ delete_mac }} | DHCP: {{ 'ON' if dhcp_enabled else 'OFF' }} | Firewall: {{ 'ON' if firewall_enabled else 'OFF' }} | Server: {{ server_id }}"
 
-    # 操作摘要
     - name: "📊 Operations Overview"
       ansible.builtin.debug:
         msg: "📊 操作概覽 | DHCP Server: {{ server_info.dhcp_description | default('N/A') }} | Address Group: {{ address_group_name }} | Address Object: {{ firewall_address_name | default('N/A') }} | Address在Group中: {{ address_in_group }}"
 
-    # ==================== DHCP 執行部分 ====================
-    - name: "📊 DHCP Execution Section"
+    # ==================== DHCP 執行區塊 ====================
+    - name: "📊 DHCP Execution Section Header"
       ansible.builtin.debug:
-        msg: "==================== DHCP 執行 ===================="
+        msg: "==================== DHCP 執行區塊 ===================="
       when: dhcp_enabled
 
-    # DHCP 執行前配置驗證
     - name: "🔍 DHCP Pre-execution Verification"
       ansible.builtin.uri:
         url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ server_id }}/reserved-address/{{ dhcp_target_id }}"
@@ -125,7 +123,6 @@
       delay: "{{ api_delay }}"
       when: dhcp_enabled
 
-    # DHCP 配置一致性檢查
     - name: "🔍 DHCP Configuration Consistency Check"
       ansible.builtin.set_fact:
         dhcp_config_consistent: "{{ 
@@ -141,7 +138,6 @@
         - dhcp_enabled
         - not dhcp_config_consistent
 
-    # 執行DHCP MAC刪除操作
     - name: "🔧 Execute DHCP MAC Delete Operation"
       ansible.builtin.uri:
         url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ server_id }}/reserved-address/{{ dhcp_target_id }}"
@@ -161,7 +157,6 @@
       delay: "{{ api_delay }}"
       when: dhcp_enabled
 
-    # DHCP 成功結果
     - name: "🎉 DHCP Operation Success"
       ansible.builtin.debug:
         msg: "✅ DHCP操作成功 | ID: {{ dhcp_target_id }} | IP: {{ dhcp_target_ip }} | MAC: {{ dhcp_original_mac }}→{{ dhcp_reserved_mac }}"
@@ -169,7 +164,6 @@
         - dhcp_enabled
         - dhcp_result.status == 200
 
-    # DHCP 失敗處理
     - name: "❌ DHCP Operation Failed"
       ansible.builtin.fail:
         msg: "❌ DHCP操作失敗，停止後續Firewall操作 | HTTP狀態: {{ dhcp_result.status | default('未知') }} | 錯誤: {{ dhcp_result.msg | default('未知') }}"
@@ -177,19 +171,17 @@
         - dhcp_enabled
         - dhcp_result.status != 200
 
-    # DHCP 跳過訊息
     - name: "⏭️ DHCP Operation Skipped"
       ansible.builtin.debug:
         msg: "⏭️ DHCP操作已跳過（Preview中未找到目標MAC）"
       when: not dhcp_enabled
 
-    # ==================== Firewall 執行部分 ====================
-    - name: "🔥 Firewall Execution Section"
+    # ==================== Firewall 執行區塊 ====================
+    - name: "🔥 Firewall Execution Section Header"
       ansible.builtin.debug:
-        msg: "==================== Firewall 執行 ===================="
+        msg: "==================== Firewall 執行區塊 ===================="
       when: firewall_enabled
 
-    # 顯示 Firewall 執行計劃
     - name: "📋 Firewall Execution Plan"
       ansible.builtin.debug:
         msg: "📋 執行計劃 | Step 1: {{ '從Group移除Member' if address_in_group else '跳過Group更新' }} | Step 2: 刪除Address Object | Address: {{ firewall_address_name }}"
@@ -215,7 +207,6 @@
         - firewall_enabled
         - address_in_group
 
-    # Address Group 更新成功
     - name: "🎉 Address Group Update Success"
       ansible.builtin.debug:
         msg: "✅ Address Group更新成功 | Group: {{ address_group_name }} | 移除Member: {{ firewall_address_name }} | 剩餘Members: {{ updated_group_members | length }}"
@@ -224,7 +215,6 @@
         - address_in_group
         - group_update_result.status == 200
 
-    # Address Group 更新失敗
     - name: "❌ Address Group Update Failed"
       ansible.builtin.fail:
         msg: "❌ Address Group更新失敗，停止Address刪除 | Group: {{ address_group_name }} | HTTP狀態: {{ group_update_result.status | default('未知') }} | 錯誤: {{ group_update_result.json.cli_error | default([group_update_result.msg | default('未知')]) | join(', ') }}"
@@ -233,7 +223,6 @@
         - address_in_group
         - group_update_result.status != 200
 
-    # Address 不在 Group 中的情況
     - name: "ℹ️ Address Not in Group - Skip Group Update"
       ansible.builtin.debug:
         msg: "ℹ️ Address {{ firewall_address_name }} 不在 Group {{ address_group_name }} 中，跳過Group更新，直接進行Address刪除"
@@ -258,7 +247,6 @@
         - firewall_enabled
         - (not address_in_group) or (address_in_group and group_update_result.status == 200)
 
-    # Address 刪除成功
     - name: "🎉 Firewall Address Delete Success"
       ansible.builtin.debug:
         msg: "✅ Address刪除成功 | Name: {{ firewall_address_name }} | MAC: {{ firewall_address_mac }} | Comment: {{ firewall_address_comment }}"
@@ -266,7 +254,6 @@
         - firewall_enabled
         - address_delete_result.status == 200
 
-    # Address 刪除失敗
     - name: "❌ Firewall Address Delete Failed"
       ansible.builtin.debug:
         msg: "❌ Address刪除失敗 | Name: {{ firewall_address_name }} | HTTP狀態: {{ address_delete_result.status | default('未知') }} | 錯誤: {{ address_delete_result.json.cli_error | default([address_delete_result.msg | default('未知')]) | join(', ') }}"
@@ -274,18 +261,16 @@
         - firewall_enabled
         - address_delete_result.status != 200
 
-    # Firewall 跳過訊息
     - name: "⏭️ Firewall Operation Skipped"
       ansible.builtin.debug:
         msg: "⏭️ Firewall操作已跳過（Preview中未找到目標Address Object）"
       when: not firewall_enabled
 
-    # ==================== 操作後驗證 ====================
-    - name: "🔍 Post-execution Verification Section"
+    # ==================== 操作後驗證區塊 ====================
+    - name: "🔍 Post-execution Verification Section Header"
       ansible.builtin.debug:
         msg: "==================== 操作後驗證 ===================="
 
-    # 驗證DHCP配置
     - name: "🔍 Verify DHCP Configuration"
       ansible.builtin.uri:
         url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ server_id }}/reserved-address/{{ dhcp_target_id }}"
@@ -310,7 +295,6 @@
         - dhcp_verification is defined
         - dhcp_verification.json.results | length > 0
 
-    # 驗證Address是否已刪除
     - name: "🔍 Verify Address Deletion"
       ansible.builtin.uri:
         url: "https://{{ fortigate_host }}/api/v2/cmdb/firewall/address/{{ firewall_address_name }}"
@@ -334,7 +318,6 @@
         - firewall_enabled
         - address_verification is defined
 
-    # 驗證Address Group更新
     - name: "🔍 Verify Address Group Update"
       ansible.builtin.uri:
         url: "https://{{ fortigate_host }}/api/v2/cmdb/firewall/addrgrp/{{ address_group_name }}"
@@ -354,14 +337,14 @@
 
     - name: "✅ Address Group Verification"
       ansible.builtin.debug:
-        msg: "✅ Address Group驗證通過 | Group: {{ address_group_name }} | 當前Members數: {{ (group_verification.json.results | first).member | length }} | Address已移除: {{ firewall_address_name not in (group_verification.json.results | first).member }}"
+        msg: "✅ Address Group驗證通過 | Group: {{ address_group_name }} | 當前Members數: {{ (group_verification.json.results | first).member | length }} | Address已移除: {{ firewall_address_name not in (group_verification.json.results | first).member | map(attribute='name') | list }}"
       when: 
         - firewall_enabled
         - group_verification is defined
         - group_verification.json.results | length > 0
 
-    # ==================== 最終摘要 ====================
-    - name: "📊 Final Summary Section"
+    # ==================== 最終摘要區塊 ====================
+    - name: "📊 Final Summary Section Header"
       ansible.builtin.debug:
         msg: "==================== 最終摘要 ===================="
 
@@ -385,6 +368,6 @@
         address_status: "{{ '✅成功' if address_delete_result.status == 200 else '❌失敗' }}"
       when: firewall_enabled
 
-    - name: "📅 Completion Time"
+    - name: "📅 Completion Information"
       ansible.builtin.debug:
-        msg: "📅 完成時間: {{ ansible_date_time.iso8601 }} | 版本: v5.1"
+        msg: "📅 完成時間: {{ ansible_date_time.iso8601 }} | 版本: v6.0"
