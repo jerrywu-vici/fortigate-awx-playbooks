@@ -173,10 +173,11 @@ MAC 格式: ff:ff:ff:ff:fX:XX
             [END]                  [END]
 ```
 
-### 4.2 Survey 邏輯設計
+### 4.2 Workflow Survey 邏輯設計
 ```yaml
 # Survey 問題設計
-- question_name: 輸入要刪除的MAC地址
+- 問題1: MAC位址
+  question_name: 輸入要刪除的MAC地址
   Description: 請輸入完整MAC地址 (格式: xx:xx:xx:xx:xx:xx)，例如：00:11:22:33:44:55
   Answer variable name: delete_mac_param
   Answer type: Text
@@ -184,7 +185,8 @@ MAC 格式: ff:ff:ff:ff:fX:XX
   Minimum length: 17
   Maximum length: 17
   
-- question_name: 選擇DHCP Server ID (ID 2 = vlan40_PC,ID 12 = vlan22_FIC_WAN)
+- 問題2: DHCP Server ID
+  question_name: 選擇DHCP Server ID (ID 2 = vlan40_PC,ID 12 = vlan22_FIC_WAN)
   Description: ID 2 = vlan40_PC,ID 12 = vlan22_FIC_WAN
   Answer variable name: server_id
   Answer type: Multiple Choice(single select)
