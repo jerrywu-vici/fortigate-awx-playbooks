@@ -125,34 +125,10 @@ MAC 格式: ff:ff:ff:ff:fX:XX
 **Description 還原:**
 - Description 一律還原為 "Reserved"
 
-#### Firewall Address Group 處理
-目標環境中的 Address Groups:
-```bash
-config firewall addrgrp
-    edit "Group_22_FIC_Allow-MAC"
-        set member "MAC_Chiachi_NB_WLAN" "MAC_Barz_NB_WLAN" "MAC_Ian.su_NB_WLAN"
-    next
-    edit "Group_40_PC-Allow-MAC"
-        set member "MAC_test_PC_WLAN" "MAC_other_device"
-    next
-end
-```
-
-#### Firewall Address 物件格式
-```bash
-config firewall address
-    edit "MAC_test_PC_WLAN"
-        set type mac
-        set comment "172.23.22.170"
-        set macaddr "00:11:22:33:44:55"
-    next
-end
-```
 
 ### 2.2 Survey 設計
-- **問題1**: 操作類型選擇 (DHCP Reserved Address / Firewall Address)
-- **問題2**: 要刪除的 MAC 地址或物件名稱
-- **問題3**: 選擇 DHCP Server ID (僅 DHCP 模式需要)
+- **問題1**: 要刪除的 MAC 地址或物件名稱
+- **問題2**: 選擇 DHCP Server ID (僅 DHCP 模式需要)
   - ID 2 = vlan40_PC
   - ID 12 = vlan22_FIC_WAN
 
@@ -170,7 +146,7 @@ end
 
 #### Preview Job Template (v5.6)
 - **Name**: `FortiGate Multi-Function Delete - Preview v5.6`
-- **Playbook**: `fortigate_multi_delete_preview_v5.6.yml`
+- **Playbook**: `FortiGate DHCP Reserved Delete Preview For Workflow.yml`
 - **Credentials**: FortiGate Production
 - **Survey**: 不需要
 - **功能**: 整合 DHCP Reserved 和 Firewall Address 的預覽功能
