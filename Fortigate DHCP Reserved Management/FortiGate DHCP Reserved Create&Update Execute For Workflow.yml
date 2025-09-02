@@ -1,14 +1,14 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address Create&Update Execute v6.0
+# FortiGate DHCP Reserved Address Create&Update Execute v1.0
 # 用途：執行實際的DHCP Reserved Address創建或更新操作
 # 功能：根據Preview結果執行CREATE或UPDATE操作
 # 輸入：接收Preview步驟的workflow變數
 # 輸出：執行結果和操作摘要
-# 版本：v6.0 - 統一設計架構，修正字符串類型轉換問題
+# 版本：v1.0 - 統一設計架構，優化輸出格式
 # =============================================================================
 
-- name: FortiGate DHCP Reserved Create&Update Execute For Workflow v6.0
+- name: FortiGate DHCP Reserved Create&Update Execute For Workflow v1.0
   hosts: localhost
   connection: local
   gather_facts: true
@@ -42,7 +42,11 @@
     # ==================== 參數驗證區塊 ====================
     - name: "🔍 Validate Workflow Parameters"
       ansible.builtin.fail:
-        msg: "從Workflow接收參數失敗！缺少關鍵參數。此Job Template僅應在Workflow中執行。"
+        msg: |
+          ❌ 從Workflow接收參數失敗！缺少關鍵參數
+          
+          此Job Template僅應在Workflow中執行
+          請確認Preview步驟已正確完成
       when: 
         - target_ip is not defined or 
           target_mac is not defined or
@@ -51,7 +55,13 @@
 
     - name: "🔍 Validate FortiGate Credentials"
       ansible.builtin.fail:
-        msg: "缺少FortiGate Credential參數！請確認Job Template已正確設定Credential。"
+        msg: |
+          ❌ 缺少FortiGate Credential參數！
+          
+          請確認Job Template已正確設定Credential
+          檢查項目:
+          - FortiGate Host
+          - API Access Token
       when: 
         - fortigate_host is not defined or 
           fortigate_access_token is not defined
@@ -79,7 +89,7 @@
     # ==================== 執行資訊顯示 ====================
     - name: "📋 Execution Information Header"
       ansible.builtin.debug:
-        msg: "==================== FortiGate DHCP Reserved Create&Update Execute v6.0 ===================="
+        msg: "==================== FortiGate DHCP Reserved Create&Update Execute v1.0 ===================="
 
     - name: "🚀 Execute Parameters Summary"
       ansible.builtin.debug:
@@ -92,7 +102,13 @@
     # ==================== 無需操作處理 ====================
     - name: "ℹ️ No Operation Required"
       ansible.builtin.debug:
-        msg: "ℹ️ 配置已是最新狀態，無需執行任何操作 | IP: {{ target_ip }} | MAC: {{ target_mac }} | 描述: {{ target_description }}"
+        msg: |
+          ℹ️ 配置已是最新狀態，無需執行任何操作
+          
+          當前配置:
+          - IP地址: {{ target_ip }}
+          - MAC地址: {{ target_mac }}
+          - 描述: {{ target_description }}
       when: not needs_operation
 
     # ==================== 執行前驗證區塊 ====================
@@ -129,7 +145,14 @@
 
     - name: "❌ Configuration Changed During Review"
       ansible.builtin.fail:
-        msg: "配置在審核期間已被修改，請重新執行Preview步驟確認最新狀態"
+        msg: |
+          ❌ 配置在審核期間已被修改
+          
+          檢測到配置不一致:
+          - 原始IP: {{ existing_object.ip }}
+          - 原始MAC: {{ existing_object.mac }}
+          
+          解決方案: 請重新執行Preview步驟確認最新狀態
       when: 
         - needs_operation
         - operation_type == "UPDATE"
@@ -167,7 +190,14 @@
 
     - name: "🎉 CREATE Operation Success"
       ansible.builtin.debug:
-        msg: "✅ CREATE操作成功 | IP: {{ target_ip }} | MAC: {{ target_mac }} | 描述: {{ target_description }} | Server: {{ server_id }}"
+        msg: |
+          ✅ CREATE操作成功完成
+          
+          配置詳情:
+          - IP地址: {{ target_ip }}
+          - MAC地址: {{ target_mac }}
+          - 描述: {{ target_description }}
+          - DHCP Server: {{ server_id }}
       when: 
         - needs_operation
         - operation_type == "CREATE"
@@ -175,7 +205,17 @@
 
     - name: "❌ CREATE Operation Failed"
       ansible.builtin.fail:
-        msg: "❌ CREATE操作失敗 | HTTP狀態: {{ create_result.status | default('未知') }} | 錯誤: {{ create_result.json.cli_error | default([create_result.msg | default('未知')]) | join(', ') }}"
+        msg: |
+          ❌ CREATE操作失敗
+          
+          錯誤詳情:
+          - HTTP狀態: {{ create_result.status | default('未知') }}
+          - 錯誤訊息: {{ create_result.json.cli_error | default([create_result.msg | default('未知')]) | join(', ') }}
+          
+          請檢查:
+          1. IP地址是否在DHCP範圍內
+          2. MAC地址格式是否正確
+          3. 是否有重複配置
       when: 
         - needs_operation
         - operation_type == "CREATE"
@@ -212,7 +252,14 @@
 
     - name: "🎉 UPDATE Operation Success"
       ansible.builtin.debug:
-        msg: "✅ UPDATE操作成功 | ID: {{ existing_object.id | string }} | IP: {{ target_ip }} | MAC: {{ target_mac }} | 描述: {{ target_description }}"
+        msg: |
+          ✅ UPDATE操作成功完成
+          
+          配置詳情:
+          - 配置ID: {{ existing_object.id | string }}
+          - IP地址: {{ target_ip }}
+          - MAC地址: {{ target_mac }}
+          - 描述: {{ target_description }}
       when: 
         - needs_operation
         - operation_type == "UPDATE"
@@ -220,7 +267,18 @@
 
     - name: "❌ UPDATE Operation Failed"
       ansible.builtin.fail:
-        msg: "❌ UPDATE操作失敗 | HTTP狀態: {{ update_result.status | default('未知') }} | 錯誤: {{ update_result.json.cli_error | default([update_result.msg | default('未知')]) | join(', ') }}"
+        msg: |
+          ❌ UPDATE操作失敗
+          
+          錯誤詳情:
+          - 配置ID: {{ existing_object.id | string }}
+          - HTTP狀態: {{ update_result.status | default('未知') }}
+          - 錯誤訊息: {{ update_result.json.cli_error | default([update_result.msg | default('未知')]) | join(', ') }}
+          
+          請檢查:
+          1. 配置是否仍然存在
+          2. MAC地址格式是否正確
+          3. 權限是否充足
       when: 
         - needs_operation
         - operation_type == "UPDATE"
@@ -248,7 +306,7 @@
         - needs_operation
         - (create_result.status == 200 if operation_type == 'CREATE' else update_result.status == 200)
 
-    - name: "✅ Operation Verification Result"
+- name: "✅ Operation Verification Result"
       ansible.builtin.debug:
         msg: "✅ 操作驗證通過 | 找到配置: {{ post_verification.json.results | length }} 筆 | 當前MAC: {{ (post_verification.json.results | first).mac }} | 當前描述: {{ (post_verification.json.results | first).description }}"
       when: 
@@ -263,7 +321,23 @@
 
     - name: "📊 Operation Results Summary"
       ansible.builtin.debug:
-        msg: "📊 {{ operation_type }}操作結果 | IP: {{ target_ip }} | MAC: {{ target_mac }} | 狀態: {{ operation_status }}"
+        msg: |
+          📊 {{ operation_type }}操作結果摘要
+          
+          基本資訊:
+          - IP地址: {{ target_ip }}
+          - MAC地址: {{ target_mac }}
+          - 執行狀態: {{ operation_status }}
+          
+          {% if needs_operation and operation_type == 'CREATE' and create_result.status == 200 %}
+          ✅ 新配置已成功創建
+          {% elif needs_operation and operation_type == 'UPDATE' and update_result.status == 200 %}
+          ✅ 既有配置已成功更新
+          {% elif not needs_operation %}
+          ℹ️ 配置已是最新狀態，無需變更
+          {% else %}
+          ❌ 操作執行失敗，請檢查錯誤訊息
+          {% endif %}
       vars:
         operation_status: >-
           {%- if not needs_operation -%}
@@ -278,8 +352,15 @@
 
     - name: "📊 Configuration Details"
       ansible.builtin.debug:
-        msg: "📊 配置詳情 | Server: {{ server_id }} ({{ server_info.dhcp_description | default('N/A') }}) | 描述: {{ target_description }}"
+        msg: |
+          📊 配置環境資訊
+          
+          DHCP Server: {{ server_id }} ({{ server_info.dhcp_description | default('N/A') }})
+          描述資訊: {{ target_description }}
+          {% if backup_info.timestamp is defined %}
+          備份時間: {{ backup_info.timestamp }}
+          {% endif %}
 
     - name: "📅 Completion Information"
       ansible.builtin.debug:
-        msg: "📅 完成時間: {{ ansible_date_time.iso8601 }} | 版本: v6.0"
+        msg: "📅 完成時間: {{ ansible_date_time.iso8601 }} | 版本: v1.0"
