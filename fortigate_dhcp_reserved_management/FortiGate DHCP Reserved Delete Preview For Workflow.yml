@@ -6,7 +6,7 @@
 # 輸出：顯示DHCP和Firewall兩個功能的變更預覽，設定workflow變數
 # =============================================================================
 
-- name: FortiGate DHCP + Firewall Delete Preview For Workflow v5.6
+- name: FortiGate DHCP Reserved Delete Preview For Workflow v5.6
   hosts: localhost
   connection: local
   gather_facts: true
