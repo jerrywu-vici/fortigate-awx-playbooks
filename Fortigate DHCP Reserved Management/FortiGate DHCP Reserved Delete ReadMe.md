@@ -145,15 +145,15 @@ MAC 格式: ff:ff:ff:ff:fX:XX
 ### 3.1 整合 Job Templates
 
 #### Preview Job Template (v5.6)
-- **Name**: `FortiGate Multi-Function Delete - Preview v5.6`
+- **Name**: `FortiGate DHCP Reserved Delete - Preview`
 - **Playbook**: `FortiGate DHCP Reserved Delete Preview For Workflow.yml`
 - **Credentials**: FortiGate Production
 - **Survey**: 不需要
 - **功能**: 整合 DHCP Reserved 和 Firewall Address 的預覽功能
 
 #### Execute Job Template (v5.1)
-- **Name**: `FortiGate Multi-Function Delete - Execute v5.1`
-- **Playbook**: `fortigate_multi_delete_execute_v5.1.yml`
+- **Name**: `FortiGate DHCP Reserved Delete - Execute`
+- **Playbook**: `FortiGate DHCP Reserved Delete Execute For Workflow.yml`
 - **Credentials**: FortiGate Production
 - **Survey**: 不需要
 - **功能**: 整合 DHCP Reserved 和 Firewall Address 的執行功能
@@ -161,7 +161,7 @@ MAC 格式: ff:ff:ff:ff:fX:XX
 ## 🔗 Workflow Template
 
 ### 4.1 整合刪除 Workflow
-- **Name**: `Workflow-FortiGate Multi-Function Delete with Approval`
+- **Name**: `Workflow-FortiGate DHCP Reserved Delete with Approval`
 - **Survey**: 操作類型 + MAC地址/物件名稱 + DHCP Server ID (條件性顯示)
 
 **Workflow Nodes 流程:**
@@ -176,13 +176,6 @@ MAC 格式: ff:ff:ff:ff:fX:XX
 ### 4.2 Survey 邏輯設計
 ```yaml
 # Survey 問題設計
-- name: operation_type
-  question_name: "選擇操作類型"
-  type: multiplechoice
-  choices:
-    - dhcp_reserved
-    - firewall_address
-  
 - name: target_input
   question_name: "輸入目標 MAC 地址或物件名稱"
   type: text
@@ -217,12 +210,10 @@ MAC 格式: ff:ff:ff:ff:fX:XX
 
 ## 📁 檔案結構
 ```
-├── playbooks/
-│   ├── fortigate_multi_delete_preview_v5.6.yml
-│   └── fortigate_multi_delete_execute_v5.1.yml
-├── inventory/
-│   └── fortigate_hosts.yml
-└── README.md
+├── Fortigate DHCP Reserved Management/
+│   ├── FortiGate DHCP Reserved Delete Preview For Workflow.yml
+│   ├── FortiGate DHCP Reserved Delete Execute For Workflow.yml
+└── └── FortiGate DHCP Reserved Delete README.md
 ```
 
 ## ⚠️ 注意事項
