@@ -5,7 +5,7 @@
 # 功能：根據Preview結果執行CREATE或UPDATE操作
 # 輸入：接收Preview步驟的workflow變數
 # 輸出：執行結果和操作摘要
-# 版本：v6.0 - 統一設計架構，優化代碼結構
+# 版本：v6.0 - 統一設計架構，優化代碼結構，移除未使用參數
 # =============================================================================
 
 - name: FortiGate DHCP Reserved Create&Update Execute For Workflow v6.0
@@ -28,7 +28,6 @@
     # 接收workflow變數 - 系統資訊
     server_info: "{{ (wf_server_info | default('{}')) | from_json }}"
     backup_info: "{{ (wf_backup_info | default('{}')) | from_json }}"
-    vdom_name: "{{ wf_vdom_name | default('root') }}"
     preview_version: "{{ wf_preview_version | default('unknown') }}"
     
     # FortiGate連接參數
@@ -36,7 +35,6 @@
     fortigate_token: "{{ fortigate_access_token }}"
     api_retries: "{{ fortigate_api_retries | default('3') | int }}"
     api_delay: "{{ fortigate_api_delay | default('5') | int }}"
-    backup_enabled: "{{ fortigate_backup_enabled | default(true) | bool }}"
     connection_timeout: "{{ fortigate_timeout | default('30') | int }}"
     validate_certs: "{{ fortigate_validate_certs | default(false) | bool }}"
     
@@ -89,7 +87,7 @@
 
     - name: "📊 Operations Overview"
       ansible.builtin.debug:
-        msg: "📊 操作概覽 | DHCP Server: {{ server_info.dhcp_description | default('N/A') }} | 網段: {{ server_info.network_segment | default('N/A') }} | 描述: {{ target_description }}"
+        msg: "📊 操作概覽 | DHCP Server: {{ server_info.dhcp_description | default('N/A') }} | 描述: {{ target_description }}"
 
     # ==================== 無需操作處理 ====================
     - name: "ℹ️ No Operation Required"
@@ -250,7 +248,7 @@
         - needs_operation
         - (create_result.status == 200 if operation_type == 'CREATE' else update_result.status == 200)
 
-    - name: "✅ Operation Verification Result"
+- name: "✅ Operation Verification Result"
       ansible.builtin.debug:
         msg: "✅ 操作驗證通過 | 找到配置: {{ post_verification.json.results | length }} 筆 | 當前MAC: {{ (post_verification.json.results | first).mac }} | 當前描述: {{ (post_verification.json.results | first).description }}"
       when: 
@@ -280,7 +278,7 @@
 
     - name: "📊 Configuration Details"
       ansible.builtin.debug:
-        msg: "📊 配置詳情 | Server: {{ server_id }} ({{ server_info.dhcp_description | default('N/A') }}) | 網段: {{ server_info.network_segment | default('N/A') }} | 描述: {{ target_description }}"
+        msg: "📊 配置詳情 | Server: {{ server_id }} ({{ server_info.dhcp_description | default('N/A') }}) | 描述: {{ target_description }}"
 
     - name: "📅 Completion Information"
       ansible.builtin.debug:
