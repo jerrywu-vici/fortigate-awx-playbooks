@@ -1,6 +1,6 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address Create/Update Playbook v3.0
+# FortiGate DHCP Reserved Create&Update Playbook v3.0
 # 
 # 功能說明：
 # 1. 支援新增DHCP reserved-address配置
@@ -12,7 +12,7 @@
 # 版本：v3.0 - Create/Update功能
 # =============================================================================
 
-- name: FortiGate DHCP Reserved Address Create/Update v3.0
+- name: FortiGate DHCP Reserved Create&Update v3.0
   hosts: localhost
   connection: local
   gather_facts: false
