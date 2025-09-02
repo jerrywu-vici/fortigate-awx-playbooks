@@ -1,0 +1,276 @@
+---
+# =============================================================================
+# FortiGate DHCP Reserved Address Create&Update Preview v6.0
+# 用途：預覽DHCP Reserved Address的創建或更新操作
+# 功能：智能檢測衝突、分析現有配置、判斷操作類型
+# 輸出：顯示配置變更預覽，設定workflow變數
+# 版本：v6.0 - 統一設計架構，優化代碼結構
+# =============================================================================
+
+- name: FortiGate DHCP Reserved Create&Update Preview For Workflow v6.0
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  vars:
+    # Survey 參數
+    target_ip: "{{ ip_param }}"
+    target_mac: "{{ mac_param }}"
+    target_description: "{{ desc_param }}"
+    target_dhcp_server_id: "{{ server_id | default('3') }}"
+    
+    # Server ID 對應關係
+    server_mapping:
+      "2":
+        dhcp_description: "vlan40_PC"
+        network_segment: "192.168.40.0/24"
+      "3":
+        dhcp_description: "vlan50_Guest"
+        network_segment: "192.168.50.0/24"
+      "12":
+        dhcp_description: "vlan22_FIC_WAN"
+        network_segment: "172.23.22.0/24"
+    
+    # API 連接參數
+    api_retries: "{{ fortigate_api_retries | default('3') | int }}"
+    api_delay: "{{ fortigate_api_delay | default('5') | int }}"
+    backup_enabled: "{{ fortigate_backup_enabled | default(true) | bool }}"
+    connection_timeout: "{{ fortigate_timeout | default('30') | int }}"
+    validate_certs: "{{ fortigate_validate_certs | default(false) | bool }}"
+    
+  tasks:
+    # ==================== 參數驗證區塊 ====================
+    - name: "🔍 Validate FortiGate Credentials"
+      ansible.builtin.fail:
+        msg: "缺少FortiGate Credential參數: {{ missing_params | join(', ') }}"
+      vars:
+        required_params:
+          - fortigate_host
+          - fortigate_access_token
+        missing_params: "{{ required_params | select('undefined') | list }}"
+      when: 
+        - fortigate_host is not defined or 
+          fortigate_access_token is not defined
+
+    - name: "🔍 Validate Survey Parameters"
+      ansible.builtin.fail:
+        msg: "缺少Survey參數: {{ missing_survey_params | join(', ') }}"
+      vars:
+        required_survey_params:
+          - ip_param
+          - mac_param
+          - desc_param
+          - server_id
+        missing_survey_params: "{{ required_survey_params | select('undefined') | list }}"
+      when: 
+        - ip_param is not defined or 
+          mac_param is not defined or 
+          desc_param is not defined or 
+          server_id is not defined
+
+    - name: "🔍 Validate Server ID"
+      ansible.builtin.fail:
+        msg: "不支援的DHCP Server ID: {{ target_dhcp_server_id }}。支援的ID: {{ server_mapping.keys() | list | join(', ') }}"
+      when: target_dhcp_server_id not in server_mapping
+
+    # ==================== 初始設定區塊 ====================
+    - name: "🔧 Set Server Mapping Information"
+      ansible.builtin.set_fact:
+        server_info: "{{ server_mapping[target_dhcp_server_id] }}"
+
+    - name: "🔍 Validate IP Address Format"
+      ansible.builtin.set_fact:
+        ip_valid: "{{ target_ip | ansible.utils.ipaddr }}"
+
+    - name: "❌ IP Address Format Error"
+      ansible.builtin.fail:
+        msg: "IP地址格式錯誤: {{ target_ip }}。請使用正確的IPv4格式，例如：192.168.1.100"
+      when: not ip_valid
+
+    - name: "🔍 Validate MAC Address Format"
+      ansible.builtin.set_fact:
+        mac_valid: "{{ target_mac | regex_search('^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$') is not none }}"
+
+    - name: "❌ MAC Address Format Error"
+      ansible.builtin.fail:
+        msg: "MAC地址格式錯誤: {{ target_mac }}。正確格式: xx:xx:xx:xx:xx:xx 或 xx-xx-xx-xx-xx-xx"
+      when: not mac_valid
+
+    - name: "🔧 Normalize MAC Address Format"
+      ansible.builtin.set_fact:
+        normalized_mac: "{{ target_mac | replace('-', ':') | lower }}"
+
+    # ==================== API 連接驗證 ====================
+    - name: "🔌 Test FortiGate API Connection"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/system/global"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        validate_certs: "{{ validate_certs }}"
+        status_code: 200
+        timeout: "{{ connection_timeout }}"
+      register: api_test
+      retries: "{{ api_retries }}"
+      delay: "{{ api_delay }}"
+
+    - name: "✅ API Connection Established"
+      ansible.builtin.debug:
+        msg: "✅ API連線成功 | FortiGate版本: {{ fortigate_version }}"
+      vars:
+        fortigate_version: "{{ api_test.json.results.version | default(api_test.json.version | default('未知')) }}"
+
+    # ==================== 預覽資訊顯示 ====================
+    - name: "📋 Preview Information Header"
+      ansible.builtin.debug:
+        msg: "==================== FortiGate DHCP Reserved Create&Update Preview v6.0 ===================="
+
+    - name: "📋 Preview Parameters Summary"
+      ansible.builtin.debug:
+        msg: "🔍 Create&Update預覽模式 | 目標IP: {{ target_ip }} | 目標MAC: {{ normalized_mac }} | 描述: {{ target_description }} | DHCP Server: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }}) | Host: {{ fortigate_host }}"
+
+    # ==================== DHCP 配置分析區塊 ====================
+    - name: "📊 DHCP Configuration Analysis Section Header"
+      ansible.builtin.debug:
+        msg: "==================== DHCP 配置分析 ===================="
+
+    - name: "🔍 Get Current DHCP Reserved Addresses"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ target_dhcp_server_id }}/reserved-address"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        validate_certs: "{{ validate_certs }}"
+        status_code: 200
+        timeout: "{{ connection_timeout }}"
+      register: existing_reservations
+      retries: "{{ api_retries }}"
+      delay: "{{ api_delay }}"
+
+    - name: "🔍 DHCP Configuration Information"
+      ansible.builtin.debug:
+        msg: "🔍 分析DHCP配置 | 總計: {{ existing_reservations.json.results | length }} 筆 | 目標IP: {{ target_ip }} | 目標MAC: {{ normalized_mac }}"
+
+    # ==================== MAC 衝突檢測區塊 ====================
+    - name: "🔍 MAC Conflict Detection"
+      ansible.builtin.set_fact:
+        mac_conflict_object: "{{ item }}"
+      loop: "{{ existing_reservations.json.results }}"
+      when:
+        - mac_conflict_object is not defined
+        - item.mac.lower() == normalized_mac.lower()
+      no_log: true
+
+    - name: "⚠️ MAC Conflict Analysis"
+      ansible.builtin.set_fact:
+        has_mac_conflict: "{{ mac_conflict_object is defined and mac_conflict_object.ip != target_ip }}"
+        mac_conflict_details: "{{ mac_conflict_object | default({}) }}"
+      when: mac_conflict_object is defined
+
+    - name: "❌ MAC Conflict Detected"
+      ansible.builtin.fail:
+        msg: |
+          ❌ MAC衝突檢測失敗！
+          衝突詳情：
+          - 目標MAC: {{ normalized_mac }}
+          - 目標IP: {{ target_ip }}
+          - 衝突原因: MAC {{ normalized_mac }} 已被分配給 IP {{ mac_conflict_object.ip }}
+          - 既有配置: ID {{ mac_conflict_object.id }}, 描述: {{ mac_conflict_object.description | default('無') }}
+          
+          解決方案：
+          1. 使用不同的MAC地址
+          2. 或者修改目標IP為 {{ mac_conflict_object.ip }}
+      when: has_mac_conflict | default(false)
+
+    # ==================== IP 配置分析區塊 ====================
+    - name: "🔍 Find Target IP Configuration"
+      ansible.builtin.set_fact:
+        target_ip_objects: "{{ existing_reservations.json.results | selectattr('ip', 'equalto', target_ip) | list }}"
+
+    - name: "🎯 Determine Operation Type"
+      ansible.builtin.set_fact:
+        operation_type: >-
+          {%- if target_ip_objects | length > 0 -%}
+            UPDATE
+          {%- else -%}
+            CREATE
+          {%- endif -%}
+        existing_object: "{{ target_ip_objects[0] if target_ip_objects | length > 0 else {} }}"
+        needs_operation: >-
+          {%- if target_ip_objects | length == 0 -%}
+            true
+          {%- else -%}
+            {{
+              (target_ip_objects[0].mac.lower() != normalized_mac.lower()) or
+              (target_ip_objects[0].description | default('') != target_description)
+            }}
+          {%- endif -%}
+
+    # ==================== 配置變更預覽區塊 ====================
+    - name: "📊 Configuration Change Preview Section Header"
+      ansible.builtin.debug:
+        msg: "==================== 配置變更預覽 ===================="
+
+    - name: "📊 Operation Analysis Result"
+      ansible.builtin.debug:
+        msg: "📊 操作分析 | 操作類型: {{ operation_type }} | 需要執行: {{ '是' if needs_operation else '否' }} | 檢查配置數: {{ existing_reservations.json.results | length }}"
+
+    - name: "📊 Current Configuration Display"
+      ansible.builtin.debug:
+        msg: "📊 當前配置 | ID: {{ existing_object.id }} | IP: {{ existing_object.ip }} | MAC: {{ existing_object.mac }} | 描述: {{ existing_object.description | default('空白') }}"
+      when: existing_object | length > 0
+
+    - name: "🔄 After Operation Configuration Preview"
+      ansible.builtin.debug:
+        msg: "🔄 {{ operation_type }}後預覽 | IP: {{ target_ip }} | MAC: {{ normalized_mac }} | 描述: {{ target_description }}"
+      when: needs_operation
+
+    - name: "ℹ️ No Operation Required"
+      ansible.builtin.debug:
+        msg: "ℹ️ 配置檢查完成 | 當前配置已符合目標狀態，無需執行任何變更操作"
+      when: not needs_operation
+
+    # ==================== 配置備份記錄 ====================
+    - name: "💾 Record Original Configuration for Backup"
+      ansible.builtin.set_fact:
+        create_update_backup_info:
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+          operation_type: "{{ operation_type }}"
+          target_config:
+            ip: "{{ target_ip }}"
+            mac: "{{ normalized_mac }}"
+            description: "{{ target_description }}"
+          existing_config: "{{ existing_object | default({}) }}"
+          server_info: "{{ server_info }}"
+          needs_operation: "{{ needs_operation }}"
+          purpose: "記錄DHCP Reserved Address {{ operation_type }}前的配置狀態"
+      when: backup_enabled
+
+    # ==================== 操作警告 ====================
+    - name: "⚠️ Configuration Change Warning"
+      ansible.builtin.debug:
+        msg: "⚠️ 警告：此操作將{{ '創建新的' if operation_type == 'CREATE' else '修改既有的' }}FortiGate DHCP Reserved Address配置！請在Approval Node中仔細確認後再批准執行。"
+      when: needs_operation
+
+    # ==================== Workflow 變數設定 ====================
+    - name: "📤 Set Create&Update Workflow Variables"
+      ansible.builtin.set_stats:
+        data:
+          # 目標配置變數
+          wf_target_ip: "{{ target_ip }}"
+          wf_target_mac: "{{ normalized_mac }}"
+          wf_target_description: "{{ target_description }}"
+          wf_server_id: "{{ target_dhcp_server_id }}"
+          # 操作控制變數
+          wf_operation_type: "{{ operation_type }}"
+          wf_needs_operation: "{{ needs_operation }}"
+          wf_existing_object: "{{ existing_object | to_json }}"
+          # 系統資訊變數
+          wf_server_info: "{{ server_info | to_json }}"
+          wf_backup_info: "{{ create_update_backup_info | default({}) | to_json }}"
+          wf_vdom_name: "{{ fortigate_vdom | default('root') }}"
+          wf_preview_version: "v6.0"
+
+    - name: "🎯 Create&Update Preview Complete"
+      ansible.builtin.debug:
+        msg: "🎯 Create&Update預覽完成 | 操作類型: {{ operation_type }} | 需要執行: {{ '是' if needs_operation else '否' }} | IP: {{ target_ip }} | MAC: {{ normalized_mac }} | 版本: v6.0"
