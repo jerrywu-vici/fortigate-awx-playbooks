@@ -1,4 +1,3 @@
----
 # =============================================================================
 # FortiGate DHCP Reserved Address Delete + Firewall Address Delete Preview v5.6
 # 用途：預覽要刪除的MAC配置（DHCP + Firewall Address）
@@ -33,11 +32,6 @@
     validate_certs: "{{ fortigate_validate_certs | default(false) | bool }}"
     
   tasks:
-    # 記錄開始時間
-    - name: "⏰ Record Start Time"
-      ansible.builtin.set_fact:
-        preview_start_time: "{{ ansible_date_time.epoch | int }}"
-
     # 參數驗證（保持原樣）
     - name: "🔍 Validate Credentials"
       ansible.builtin.fail:
@@ -113,7 +107,7 @@
     # 顯示預覽參數
     - name: "📋 FortiGate DHCP + Firewall Delete Preview v5.6"
       ansible.builtin.debug:
-        msg: "===========================================" 
+        msg: "==========================================="
 
     - name: "📋 Preview Parameters"
       ansible.builtin.debug:
@@ -308,16 +302,6 @@
           server_info: "{{ server_info }}"
           purpose: "記錄DHCP和Firewall變更前的原始配置"
       when: backup_enabled
-
-    # 計算預覽時間
-    - name: "⏱️ Calculate Preview Time"
-      ansible.builtin.set_fact:
-        current_time: "{{ ansible_date_time.epoch | int }}"
-        preview_time_used: "{{ (ansible_date_time.epoch | int) - (preview_start_time | int) }}"
-
-    - name: "⏱️ Preview Time Summary"
-      ansible.builtin.debug:
-        msg: "⏱️ 預覽用時: {{ preview_time_used }}s"
 
     # 最終警告
     - name: "⚠️ Configuration Change Warning"
