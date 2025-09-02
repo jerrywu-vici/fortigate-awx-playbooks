@@ -9,7 +9,7 @@
 # 輸出：執行結果和操作摘要
 # =============================================================================
 
-- name: FortiGate DHCP + Firewall Delete Execute For Workflow v5.1
+- name: FortiGate DHCP Reserved Delete Execute For Workflow v5.1
   hosts: localhost
   connection: local
   gather_facts: true
