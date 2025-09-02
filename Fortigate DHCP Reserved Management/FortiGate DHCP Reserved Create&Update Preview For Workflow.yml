@@ -2,9 +2,9 @@
 # =============================================================================
 # FortiGate DHCP Reserved Address Create&Update Preview v6.0
 # 用途：預覽DHCP Reserved Address的創建或更新操作
-# 功能：智能檢測衝突、分析現有配置、判斷操作類型
+# 功能：智能檢測衝突、分析現有配置、判斷操作類型、驗證IP範圍
 # 輸出：顯示配置變更預覽，設定workflow變數
-# 版本：v6.0 - 統一設計架構，優化代碼結構
+# 版本：v6.0 - 統一設計架構，優化代碼結構，加入IP範圍驗證
 # =============================================================================
 
 - name: FortiGate DHCP Reserved Create&Update Preview For Workflow v6.0
@@ -17,19 +17,14 @@
     target_ip: "{{ ip_param }}"
     target_mac: "{{ mac_param }}"
     target_description: "{{ desc_param }}"
-    target_dhcp_server_id: "{{ server_id | default('3') }}"
+    target_dhcp_server_id: "{{ server_id }}"
     
-    # Server ID 對應關係
+    # Server ID 對應關係 (僅保留使用的2和12)
     server_mapping:
       "2":
         dhcp_description: "vlan40_PC"
-        network_segment: "192.168.40.0/24"
-      "3":
-        dhcp_description: "vlan50_Guest"
-        network_segment: "192.168.50.0/24"
       "12":
         dhcp_description: "vlan22_FIC_WAN"
-        network_segment: "172.23.22.0/24"
     
     # API 連接參數
     api_retries: "{{ fortigate_api_retries | default('3') | int }}"
@@ -120,6 +115,44 @@
       vars:
         fortigate_version: "{{ api_test.json.results.version | default(api_test.json.version | default('未知')) }}"
 
+    # ==================== DHCP Server 配置檢查 ====================
+    - name: "🔍 Get DHCP Server Configuration"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ target_dhcp_server_id }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        validate_certs: "{{ validate_certs }}"
+        status_code: 200
+        timeout: "{{ connection_timeout }}"
+      register: dhcp_server_config
+      retries: "{{ api_retries }}"
+      delay: "{{ api_delay }}"
+
+    - name: "🔍 Validate IP Range"
+      ansible.builtin.set_fact:
+        server_config: "{{ dhcp_server_config.json.results | first }}"
+        ip_range_start: "{{ (dhcp_server_config.json.results | first)['ip-range'][0]['start-ip'] }}"
+        ip_range_end: "{{ (dhcp_server_config.json.results | first)['ip-range'][0]['end-ip'] }}"
+
+    - name: "🔍 Check IP Within Range"
+      ansible.builtin.set_fact:
+        ip_in_range: "{{ target_ip | ansible.utils.ipaddr and target_ip | ansible.utils.ipaddr >= ip_range_start | ansible.utils.ipaddr and target_ip | ansible.utils.ipaddr <= ip_range_end | ansible.utils.ipaddr }}"
+
+    - name: "❌ IP Out of Range Error"
+      ansible.builtin.fail:
+        msg: |
+          ❌ IP地址超出DHCP Server範圍！
+          詳情：
+          - 目標IP: {{ target_ip }}
+          - DHCP Server ID: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }})
+          - 允許範圍: {{ ip_range_start }} - {{ ip_range_end }}
+          
+          解決方案：
+          1. 選擇範圍內的IP地址
+          2. 或者選擇正確的DHCP Server ID
+      when: not ip_in_range
+
     # ==================== 預覽資訊顯示 ====================
     - name: "📋 Preview Information Header"
       ansible.builtin.debug:
@@ -127,7 +160,7 @@
 
     - name: "📋 Preview Parameters Summary"
       ansible.builtin.debug:
-        msg: "🔍 Create&Update預覽模式 | 目標IP: {{ target_ip }} | 目標MAC: {{ normalized_mac }} | 描述: {{ target_description }} | DHCP Server: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }}) | Host: {{ fortigate_host }}"
+        msg: "🔍 Create&Update預覽模式 | 目標IP: {{ target_ip }} | 目標MAC: {{ normalized_mac }} | 描述: {{ target_description }} | DHCP Server: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }}) | IP範圍: {{ ip_range_start }}-{{ ip_range_end }}"
 
     # ==================== DHCP 配置分析區塊 ====================
     - name: "📊 DHCP Configuration Analysis Section Header"
@@ -161,12 +194,6 @@
         - item.mac.lower() == normalized_mac.lower()
       no_log: true
 
-    - name: "⚠️ MAC Conflict Analysis"
-      ansible.builtin.set_fact:
-        has_mac_conflict: "{{ mac_conflict_object is defined and mac_conflict_object.ip != target_ip }}"
-        mac_conflict_details: "{{ mac_conflict_object | default({}) }}"
-      when: mac_conflict_object is defined
-
     - name: "❌ MAC Conflict Detected"
       ansible.builtin.fail:
         msg: |
@@ -180,7 +207,9 @@
           解決方案：
           1. 使用不同的MAC地址
           2. 或者修改目標IP為 {{ mac_conflict_object.ip }}
-      when: has_mac_conflict | default(false)
+      when: 
+        - mac_conflict_object is defined 
+        - mac_conflict_object.ip != target_ip
 
     # ==================== IP 配置分析區塊 ====================
     - name: "🔍 Find Target IP Configuration"
@@ -242,6 +271,9 @@
             description: "{{ target_description }}"
           existing_config: "{{ existing_object | default({}) }}"
           server_info: "{{ server_info }}"
+          ip_range:
+            start: "{{ ip_range_start }}"
+            end: "{{ ip_range_end }}"
           needs_operation: "{{ needs_operation }}"
           purpose: "記錄DHCP Reserved Address {{ operation_type }}前的配置狀態"
       when: backup_enabled
@@ -268,7 +300,6 @@
           # 系統資訊變數
           wf_server_info: "{{ server_info | to_json }}"
           wf_backup_info: "{{ create_update_backup_info | default({}) | to_json }}"
-          wf_vdom_name: "{{ fortigate_vdom | default('root') }}"
           wf_preview_version: "v6.0"
 
     - name: "🎯 Create&Update Preview Complete"
