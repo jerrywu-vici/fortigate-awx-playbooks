@@ -1,13 +1,13 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address Create&Update Preview v6.0
+# FortiGate DHCP Reserved Address Create&Update Preview v1.0
 # 用途：預覽DHCP Reserved Address的創建或更新操作
 # 功能：智能檢測衝突、分析現有配置、判斷操作類型、驗證IP範圍
 # 輸出：顯示配置變更預覽，設定workflow變數
-# 版本：v6.0 - 統一設計架構，優化代碼結構，加入IP範圍驗證
+# 版本：v1.0 - 統一設計架構，優化輸出格式
 # =============================================================================
 
-- name: FortiGate DHCP Reserved Create&Update Preview For Workflow v6.0
+- name: FortiGate DHCP Reserved Create&Update Preview For Workflow v1.0
   hosts: localhost
   connection: local
   gather_facts: true
@@ -37,7 +37,10 @@
     # ==================== 參數驗證區塊 ====================
     - name: "🔍 Validate FortiGate Credentials"
       ansible.builtin.fail:
-        msg: "缺少FortiGate Credential參數: {{ missing_params | join(', ') }}"
+        msg: |
+          ❌ 缺少FortiGate Credential參數: {{ missing_params | join(', ') }}
+          
+          請確認Job Template已正確設定FortiGate Credential
       vars:
         required_params:
           - fortigate_host
@@ -49,7 +52,10 @@
 
     - name: "🔍 Validate Survey Parameters"
       ansible.builtin.fail:
-        msg: "缺少Survey參數: {{ missing_survey_params | join(', ') }}"
+        msg: |
+          ❌ 缺少Survey參數: {{ missing_survey_params | join(', ') }}
+          
+          請確認已正確填寫所有必要參數
       vars:
         required_survey_params:
           - ip_param
@@ -65,7 +71,11 @@
 
     - name: "🔍 Validate Server ID"
       ansible.builtin.fail:
-        msg: "不支援的DHCP Server ID: {{ target_dhcp_server_id }}。支援的ID: {{ server_mapping.keys() | list | join(', ') }}"
+        msg: |
+          ❌ 不支援的DHCP Server ID: {{ target_dhcp_server_id }}
+          
+          支援的ID: {{ server_mapping.keys() | list | join(', ') }}
+          請選擇正確的Server ID
       when: target_dhcp_server_id not in server_mapping
 
     # ==================== 初始設定區塊 ====================
@@ -79,7 +89,10 @@
 
     - name: "❌ IP Address Format Error"
       ansible.builtin.fail:
-        msg: "IP地址格式錯誤: {{ target_ip }}。請使用正確的IPv4格式，例如：192.168.1.100"
+        msg: |
+          ❌ IP地址格式錯誤: {{ target_ip }}
+          
+          請使用正確的IPv4格式，例如：192.168.1.100
       when: not ip_valid
 
     - name: "🔍 Validate MAC Address Format"
@@ -88,7 +101,11 @@
 
     - name: "❌ MAC Address Format Error"
       ansible.builtin.fail:
-        msg: "MAC地址格式錯誤: {{ target_mac }}。正確格式: xx:xx:xx:xx:xx:xx 或 xx-xx-xx-xx-xx-xx"
+        msg: |
+          ❌ MAC地址格式錯誤: {{ target_mac }}
+          
+          正確格式: xx:xx:xx:xx:xx:xx 或 xx-xx-xx-xx-xx-xx
+          範例: 00:11:22:33:44:55
       when: not mac_valid
 
     - name: "🔧 Normalize MAC Address Format"
@@ -143,6 +160,7 @@
       ansible.builtin.fail:
         msg: |
           ❌ IP地址超出DHCP Server範圍！
+          
           詳情：
           - 目標IP: {{ target_ip }}
           - DHCP Server ID: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }})
@@ -156,7 +174,7 @@
     # ==================== 預覽資訊顯示 ====================
     - name: "📋 Preview Information Header"
       ansible.builtin.debug:
-        msg: "==================== FortiGate DHCP Reserved Create&Update Preview v6.0 ===================="
+        msg: "==================== FortiGate DHCP Reserved Create&Update Preview v1.0 ===================="
 
     - name: "📋 Preview Parameters Summary"
       ansible.builtin.debug:
@@ -198,6 +216,7 @@
       ansible.builtin.fail:
         msg: |
           ❌ MAC衝突檢測失敗！
+          
           衝突詳情：
           - 目標MAC: {{ normalized_mac }}
           - 目標IP: {{ target_ip }}
@@ -300,8 +319,8 @@
           # 系統資訊變數
           wf_server_info: "{{ server_info | to_json }}"
           wf_backup_info: "{{ create_update_backup_info | default({}) | to_json }}"
-          wf_preview_version: "v6.0"
+          wf_preview_version: "v1.0"
 
     - name: "🎯 Create&Update Preview Complete"
       ansible.builtin.debug:
-        msg: "🎯 Create&Update預覽完成 | 操作類型: {{ operation_type }} | 需要執行: {{ '是' if needs_operation else '否' }} | IP: {{ target_ip }} | MAC: {{ normalized_mac }} | 版本: v6.0"
+        msg: "🎯 Create&Update預覽完成 | 操作類型: {{ operation_type }} | 需要執行: {{ '是' if needs_operation else '否' }} | IP: {{ target_ip }} | MAC: {{ normalized_mac }} | 版本: v1.0"
