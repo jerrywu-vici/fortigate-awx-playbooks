@@ -5,7 +5,7 @@
 # 功能：根據Preview結果執行CREATE或UPDATE操作
 # 輸入：接收Preview步驟的workflow變數
 # 輸出：執行結果和操作摘要
-# 版本：v6.0 - 統一設計架構，優化代碼結構，移除未使用參數
+# 版本：v6.0 - 統一設計架構，修正字符串類型轉換問題
 # =============================================================================
 
 - name: FortiGate DHCP Reserved Create&Update Execute For Workflow v6.0
@@ -103,7 +103,7 @@
 
     - name: "🔍 Verify Current Configuration State"
       ansible.builtin.uri:
-        url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ server_id }}/reserved-address{{ '/' + existing_object.id if operation_type == 'UPDATE' else '' }}"
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ server_id }}/reserved-address{{ '/' + (existing_object.id | string) if operation_type == 'UPDATE' else '' }}"
         method: GET
         headers:
           Authorization: "Bearer {{ fortigate_token }}"
@@ -191,7 +191,7 @@
 
     - name: "🔧 Execute UPDATE Operation"
       ansible.builtin.uri:
-        url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ server_id }}/reserved-address/{{ existing_object.id }}"
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ server_id }}/reserved-address/{{ existing_object.id | string }}"
         method: PUT
         headers:
           Authorization: "Bearer {{ fortigate_token }}"
@@ -212,7 +212,7 @@
 
     - name: "🎉 UPDATE Operation Success"
       ansible.builtin.debug:
-        msg: "✅ UPDATE操作成功 | ID: {{ existing_object.id }} | IP: {{ target_ip }} | MAC: {{ target_mac }} | 描述: {{ target_description }}"
+        msg: "✅ UPDATE操作成功 | ID: {{ existing_object.id | string }} | IP: {{ target_ip }} | MAC: {{ target_mac }} | 描述: {{ target_description }}"
       when: 
         - needs_operation
         - operation_type == "UPDATE"
