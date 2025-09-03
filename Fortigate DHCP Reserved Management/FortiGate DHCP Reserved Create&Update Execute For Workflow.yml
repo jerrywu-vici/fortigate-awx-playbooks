@@ -1,14 +1,14 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address Create&Update Execute v1.0
-# 用途：執行實際的DHCP Reserved Address創建或更新操作
-# 功能：根據Preview結果執行CREATE或UPDATE操作
+# FortiGate DHCP Reserved Address Create&Update + Firewall Address Management Execute v1.0
+# 用途：執行三階段操作：DHCP + Address Object + Address Group
+# 功能：依序執行三階段操作，具備完整的錯誤處理和回滾機制
 # 輸入：接收Preview步驟的workflow變數
-# 輸出：執行結果和操作摘要
-# 版本：v1.0 - 統一設計架構，優化輸出格式
+# 輸出：三階段執行結果和操作摘要
+# 版本：v1.0 - 整合三階段自動化執行
 # =============================================================================
 
-- name: FortiGate DHCP Reserved Create&Update Execute For Workflow v1.0
+- name: FortiGate DHCP + Firewall Address Management Execute For Workflow v1.0
   hosts: localhost
   connection: local
   gather_facts: true
@@ -20,14 +20,29 @@
     target_description: "{{ wf_target_description }}"
     server_id: "{{ wf_server_id }}"
     
-    # 接收workflow變數 - 操作控制
-    operation_type: "{{ wf_operation_type }}"
-    needs_operation: "{{ (wf_needs_operation | default('false')) | bool }}"
-    existing_object: "{{ (wf_existing_object | default('{}')) | from_json }}"
+    # 接收workflow變數 - 階段1: DHCP
+    dhcp_operation_type: "{{ wf_dhcp_operation_type }}"
+    dhcp_needs_operation: "{{ (wf_dhcp_needs_operation | default('false')) | bool }}"
+    dhcp_existing_object: "{{ (wf_dhcp_existing_object | default('{}')) | from_json }}"
+    
+    # 接收workflow變數 - 階段2: Address
+    address_name: "{{ wf_address_name }}"
+    address_operation_type: "{{ wf_address_operation_type }}"
+    address_needs_operation: "{{ (wf_address_needs_operation | default('false')) | bool }}"
+    address_existing_object: "{{ (wf_address_existing_object | default('{}')) | from_json }}"
+    address_exists: "{{ (wf_address_exists | default('false')) | bool }}"
+    
+    # 接收workflow變數 - 階段3: Group
+    group_name: "{{ wf_group_name }}"
+    group_needs_operation: "{{ (wf_group_needs_operation | default('false')) | bool }}"
+    address_in_group: "{{ (wf_address_in_group | default('false')) | bool }}"
+    original_group_members: "{{ (wf_original_group_members | default('[]')) | from_json }}"
+    updated_group_members: "{{ (wf_updated_group_members | default('[]')) | from_json }}"
     
     # 接收workflow變數 - 系統資訊
     server_info: "{{ (wf_server_info | default('{}')) | from_json }}"
     backup_info: "{{ (wf_backup_info | default('{}')) | from_json }}"
+    three_stage_operations: "{{ (wf_three_stage_operations | default('false')) | bool }}"
     preview_version: "{{ wf_preview_version | default('unknown') }}"
     
     # FortiGate連接參數
@@ -37,6 +52,11 @@
     api_delay: "{{ fortigate_api_delay | default('5') | int }}"
     connection_timeout: "{{ fortigate_timeout | default('30') | int }}"
     validate_certs: "{{ fortigate_validate_certs | default(false) | bool }}"
+    
+    # 執行狀態追蹤變數
+    stage1_completed: false
+    stage2_completed: false
+    stage3_completed: false
     
   tasks:
     # ==================== 參數驗證區塊 ====================
@@ -50,7 +70,8 @@
       when: 
         - target_ip is not defined or 
           target_mac is not defined or
-          operation_type is not defined or
+          address_name is not defined or
+          group_name is not defined or
           preview_version is not defined
 
     - name: "🔍 Validate FortiGate Credentials"
@@ -65,6 +86,15 @@
       when: 
         - fortigate_host is not defined or 
           fortigate_access_token is not defined
+
+    - name: "🔍 Validate Three-Stage Operations Flag"
+      ansible.builtin.fail:
+        msg: |
+          ❌ 非三階段操作模式
+          
+          此Execute Playbook專為三階段操作設計
+          請確認使用正確的Preview Playbook
+      when: not three_stage_operations
 
     # ==================== API 連接驗證 ====================
     - name: "🔌 Test FortiGate API Connection"
@@ -87,87 +117,72 @@
         fortigate_version: "{{ api_connection_test.json.results.version | default(api_connection_test.json.version | default('未知')) }}"
 
     # ==================== 執行資訊顯示 ====================
-    - name: "📋 Execution Information Header"
+    - name: "📋 Three-Stage Execution Information Header"
       ansible.builtin.debug:
-        msg: "==================== FortiGate DHCP Reserved Create&Update Execute v1.0 ===================="
+        msg: "==================== FortiGate DHCP + Firewall Address Management Execute v1.0 ===================="
 
     - name: "🚀 Execute Parameters Summary"
       ansible.builtin.debug:
-        msg: "🚀 Create&Update執行模式 | 已通過人工確認 | 操作類型: {{ operation_type }} | 需要執行: {{ needs_operation }} | IP: {{ target_ip }} | MAC: {{ target_mac }}"
+        msg: |
+          🚀 三階段整合執行模式 | 已通過人工確認
+          
+          基本參數:
+          - IP: {{ target_ip }}
+          - MAC: {{ target_mac }}
+          - 描述: {{ target_description }}
+          - DHCP Server: {{ server_id }}
+          
+          三階段操作狀態:
+          - 階段1 (DHCP): {{ '啟用' if dhcp_needs_operation else '跳過' }} ({{ dhcp_operation_type }})
+          - 階段2 (Address): {{ '啟用' if address_needs_operation else '跳過' }} ({{ address_operation_type }})
+          - 階段3 (Group): {{ '啟用' if group_needs_operation else '跳過' }} (ADD_MEMBER)
 
     - name: "📊 Operations Overview"
       ansible.builtin.debug:
-        msg: "📊 操作概覽 | DHCP Server: {{ server_info.dhcp_description | default('N/A') }} | 描述: {{ target_description }}"
+        msg: |
+          📊 操作概覽
+          
+          DHCP Server: {{ server_info.dhcp_description | default('N/A') }}
+          Address Object: {{ address_name }}
+          Address Group: {{ group_name }}
+          執行策略: 順序執行，失敗即回滾
 
     # ==================== 無需操作處理 ====================
-    - name: "ℹ️ No Operation Required"
+    - name: "ℹ️ No Operations Required"
       ansible.builtin.debug:
         msg: |
-          ℹ️ 配置已是最新狀態，無需執行任何操作
+          ℹ️ 所有階段都無需執行操作
           
-          當前配置:
-          - IP地址: {{ target_ip }}
-          - MAC地址: {{ target_mac }}
-          - 描述: {{ target_description }}
-      when: not needs_operation
+          當前配置已符合目標狀態:
+          - DHCP Reserved Address: 已正確配置
+          - Firewall Address Object: 已正確配置
+          - Address Group Member: 已包含目標Address
+      when: 
+        - not dhcp_needs_operation
+        - not address_needs_operation
+        - not group_needs_operation
 
-    # ==================== 執行前驗證區塊 ====================
-    - name: "🔍 Pre-execution Verification Section Header"
+    # ==================== 階段1: DHCP 操作執行區塊 ====================
+    - name: "📊 Stage 1: DHCP Operation Section Header"
       ansible.builtin.debug:
-        msg: "==================== 執行前驗證 ===================="
-      when: needs_operation
+        msg: "==================== 階段1: DHCP Reserved Address 操作 ===================="
+      when: dhcp_needs_operation
 
-    - name: "🔍 Verify Current Configuration State"
+    - name: "🔍 Stage 1: Pre-execution Verification"
       ansible.builtin.uri:
-        url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ server_id }}/reserved-address{{ '/' + (existing_object.id | string) if operation_type == 'UPDATE' else '' }}"
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ server_id }}/reserved-address{{ '/' + (dhcp_existing_object.id | string) if dhcp_operation_type == 'UPDATE' else '' }}"
         method: GET
         headers:
           Authorization: "Bearer {{ fortigate_token }}"
         validate_certs: "{{ validate_certs }}"
         status_code: [200, 404]
         timeout: "{{ connection_timeout }}"
-      register: pre_execution_verification
+      register: dhcp_pre_verification
       retries: "{{ api_retries }}"
       delay: "{{ api_delay }}"
-      when: needs_operation
+      when: dhcp_needs_operation
 
-    # UPDATE 模式的一致性檢查
-    - name: "🔍 UPDATE Configuration Consistency Check"
-      ansible.builtin.set_fact:
-        config_consistent: "{{ 
-          (pre_execution_verification.json.results | first).ip == existing_object.ip and 
-          (pre_execution_verification.json.results | first).mac.lower() == existing_object.mac.lower() 
-        }}"
-      when: 
-        - needs_operation
-        - operation_type == "UPDATE"
-        - pre_execution_verification.status == 200
-
-    - name: "❌ Configuration Changed During Review"
-      ansible.builtin.fail:
-        msg: |
-          ❌ 配置在審核期間已被修改
-          
-          檢測到配置不一致:
-          - 原始IP: {{ existing_object.ip }}
-          - 原始MAC: {{ existing_object.mac }}
-          
-          解決方案: 請重新執行Preview步驟確認最新狀態
-      when: 
-        - needs_operation
-        - operation_type == "UPDATE"
-        - pre_execution_verification.status == 200
-        - not config_consistent
-
-    # ==================== CREATE 操作執行區塊 ====================
-    - name: "🆕 CREATE Operation Section Header"
-      ansible.builtin.debug:
-        msg: "==================== CREATE 操作執行 ===================="
-      when: 
-        - needs_operation
-        - operation_type == "CREATE"
-
-    - name: "🔧 Execute CREATE Operation"
+    - name: "🔧 Stage 1: Execute DHCP CREATE Operation"
       ansible.builtin.uri:
         url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ server_id }}/reserved-address"
         method: POST
@@ -181,57 +196,16 @@
         validate_certs: "{{ validate_certs }}"
         status_code: 200
         timeout: "{{ connection_timeout }}"
-      register: create_result
+      register: dhcp_create_result
       retries: "{{ api_retries }}"
       delay: "{{ api_delay }}"
       when: 
-        - needs_operation
-        - operation_type == "CREATE"
+        - dhcp_needs_operation
+        - dhcp_operation_type == "CREATE"
 
-    - name: "🎉 CREATE Operation Success"
-      ansible.builtin.debug:
-        msg: |
-          ✅ CREATE操作成功完成
-          
-          配置詳情:
-          - IP地址: {{ target_ip }}
-          - MAC地址: {{ target_mac }}
-          - 描述: {{ target_description }}
-          - DHCP Server: {{ server_id }}
-      when: 
-        - needs_operation
-        - operation_type == "CREATE"
-        - create_result.status == 200
-
-    - name: "❌ CREATE Operation Failed"
-      ansible.builtin.fail:
-        msg: |
-          ❌ CREATE操作失敗
-          
-          錯誤詳情:
-          - HTTP狀態: {{ create_result.status | default('未知') }}
-          - 錯誤訊息: {{ create_result.json.cli_error | default([create_result.msg | default('未知')]) | join(', ') }}
-          
-          請檢查:
-          1. IP地址是否在DHCP範圍內
-          2. MAC地址格式是否正確
-          3. 是否有重複配置
-      when: 
-        - needs_operation
-        - operation_type == "CREATE"
-        - create_result.status != 200
-
-    # ==================== UPDATE 操作執行區塊 ====================
-    - name: "🔄 UPDATE Operation Section Header"
-      ansible.builtin.debug:
-        msg: "==================== UPDATE 操作執行 ===================="
-      when: 
-        - needs_operation
-        - operation_type == "UPDATE"
-
-    - name: "🔧 Execute UPDATE Operation"
+    - name: "🔧 Stage 1: Execute DHCP UPDATE Operation"
       ansible.builtin.uri:
-        url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ server_id }}/reserved-address/{{ existing_object.id | string }}"
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ server_id }}/reserved-address/{{ dhcp_existing_object.id | string }}"
         method: PUT
         headers:
           Authorization: "Bearer {{ fortigate_token }}"
@@ -243,54 +217,253 @@
         validate_certs: "{{ validate_certs }}"
         status_code: 200
         timeout: "{{ connection_timeout }}"
-      register: update_result
+      register: dhcp_update_result
       retries: "{{ api_retries }}"
       delay: "{{ api_delay }}"
       when: 
-        - needs_operation
-        - operation_type == "UPDATE"
+        - dhcp_needs_operation
+        - dhcp_operation_type == "UPDATE"
 
-    - name: "🎉 UPDATE Operation Success"
+    - name: "🎉 Stage 1: DHCP Operation Success"
+      ansible.builtin.set_fact:
+        stage1_completed: true
+      when: 
+        - dhcp_needs_operation
+        - (dhcp_create_result.status == 200 if dhcp_operation_type == 'CREATE' else dhcp_update_result.status == 200)
+
+    - name: "✅ Stage 1: DHCP Operation Success Message"
       ansible.builtin.debug:
         msg: |
-          ✅ UPDATE操作成功完成
+          ✅ 階段1: DHCP {{ dhcp_operation_type }}操作成功
           
           配置詳情:
-          - 配置ID: {{ existing_object.id | string }}
+          {% if dhcp_operation_type == 'UPDATE' %}
+          - 配置ID: {{ dhcp_existing_object.id | string }}
+          {% endif %}
           - IP地址: {{ target_ip }}
           - MAC地址: {{ target_mac }}
           - 描述: {{ target_description }}
-      when: 
-        - needs_operation
-        - operation_type == "UPDATE"
-        - update_result.status == 200
+          - DHCP Server: {{ server_id }}
+      when: stage1_completed
 
-    - name: "❌ UPDATE Operation Failed"
+    - name: "❌ Stage 1: DHCP Operation Failed"
       ansible.builtin.fail:
         msg: |
-          ❌ UPDATE操作失敗
+          ❌ 階段1: DHCP {{ dhcp_operation_type }}操作失敗
           
           錯誤詳情:
-          - 配置ID: {{ existing_object.id | string }}
-          - HTTP狀態: {{ update_result.status | default('未知') }}
-          - 錯誤訊息: {{ update_result.json.cli_error | default([update_result.msg | default('未知')]) | join(', ') }}
+          - HTTP狀態: {{ (dhcp_create_result.status if dhcp_operation_type == 'CREATE' else dhcp_update_result.status) | default('未知') }}
+          - 錯誤訊息: {{ ((dhcp_create_result.json.cli_error if dhcp_operation_type == 'CREATE' else dhcp_update_result.json.cli_error) | default([dhcp_create_result.msg if dhcp_operation_type == 'CREATE' else dhcp_update_result.msg | default('未知')])) | join(', ') }}
           
-          請檢查:
-          1. 配置是否仍然存在
-          2. MAC地址格式是否正確
-          3. 權限是否充足
+          三階段操作已終止，無需回滾
       when: 
-        - needs_operation
-        - operation_type == "UPDATE"
-        - update_result.status != 200
+        - dhcp_needs_operation
+        - (dhcp_create_result.status != 200 if dhcp_operation_type == 'CREATE' else dhcp_update_result.status != 200)
+
+    # ==================== 階段2: Address Object 操作執行區塊 ====================
+    - name: "🔥 Stage 2: Address Object Operation Section Header"
+      ansible.builtin.debug:
+        msg: "==================== 階段2: Firewall Address Object 操作 ===================="
+      when: address_needs_operation
+
+    - name: "🔧 Stage 2: Execute Address CREATE Operation"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/firewall/address"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ fortigate_token }}"
+        body:
+          name: "{{ address_name }}"
+          type: "mac"
+          comment: "{{ target_ip }}"
+          macaddr:
+            - macaddr: "{{ target_mac }}"
+        body_format: json
+        validate_certs: "{{ validate_certs }}"
+        status_code: 200
+        timeout: "{{ connection_timeout }}"
+      register: address_create_result
+      retries: "{{ api_retries }}"
+      delay: "{{ api_delay }}"
+      when: 
+        - address_needs_operation
+        - address_operation_type == "CREATE"
+
+    - name: "🔧 Stage 2: Execute Address UPDATE Operation"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/firewall/address/{{ address_name }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ fortigate_token }}"
+        body:
+          name: "{{ address_name }}"
+          type: "mac"
+          comment: "{{ target_ip }}"
+          macaddr:
+            - macaddr: "{{ target_mac }}"
+        body_format: json
+        validate_certs: "{{ validate_certs }}"
+        status_code: 200
+        timeout: "{{ connection_timeout }}"
+      register: address_update_result
+      retries: "{{ api_retries }}"
+      delay: "{{ api_delay }}"
+      when: 
+        - address_needs_operation
+        - address_operation_type == "UPDATE"
+
+    - name: "🎉 Stage 2: Address Operation Success"
+      ansible.builtin.set_fact:
+        stage2_completed: true
+      when: 
+        - address_needs_operation
+        - (address_create_result.status == 200 if address_operation_type == 'CREATE' else address_update_result.status == 200)
+
+    - name: "✅ Stage 2: Address Operation Success Message"
+      ansible.builtin.debug:
+        msg: |
+          ✅ 階段2: Address Object {{ address_operation_type }}操作成功
+          
+          配置詳情:
+          - Name: {{ address_name }}
+          - Type: mac
+          - Comment: {{ target_ip }}
+          - MAC Address: {{ target_mac }}
+      when: stage2_completed
+
+    - name: "❌ Stage 2: Address Operation Failed - Initiating Rollback"
+      block:
+        - name: "🔄 Rollback Stage 1: Delete DHCP Reserved Address"
+          ansible.builtin.uri:
+            url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ server_id }}/reserved-address/{{ dhcp_target_id }}"
+            method: DELETE
+            headers:
+              Authorization: "Bearer {{ fortigate_token }}"
+            validate_certs: "{{ validate_certs }}"
+            status_code: [200, 404]
+            timeout: "{{ connection_timeout }}"
+          register: dhcp_rollback_result
+          vars:
+            dhcp_target_id: "{{ dhcp_existing_object.id if dhcp_operation_type == 'UPDATE' else (dhcp_create_result.json.mkey if dhcp_create_result is defined else '') }}"
+          when: stage1_completed
+          ignore_errors: true
+
+        - name: "❌ Stage 2 Failed with Rollback Status"
+          ansible.builtin.fail:
+            msg: |
+              ❌ 階段2: Address Object {{ address_operation_type }}操作失敗
+              
+              錯誤詳情:
+              - HTTP狀態: {{ (address_create_result.status if address_operation_type == 'CREATE' else address_update_result.status) | default('未知') }}
+              - 錯誤訊息: {{ ((address_create_result.json.cli_error if address_operation_type == 'CREATE' else address_update_result.json.cli_error) | default(['未知'])) | join(', ') }}
+              
+              回滾狀態:
+              {% if stage1_completed %}
+              - 階段1 DHCP配置回滾: {{ '✅成功' if dhcp_rollback_result.status in [200, 404] else '❌失敗' }}
+              {% endif %}
+      when: 
+        - address_needs_operation
+        - (address_create_result.status != 200 if address_operation_type == 'CREATE' else address_update_result.status != 200)
+
+    # ==================== 階段3: Address Group 操作執行區塊 ====================
+    - name: "👥 Stage 3: Address Group Operation Section Header"
+      ansible.builtin.debug:
+        msg: "==================== 階段3: Address Group Member 操作 ===================="
+      when: group_needs_operation
+
+    - name: "🔧 Stage 3: Execute Group Member ADD Operation"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/firewall/addrgrp/{{ group_name }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ fortigate_token }}"
+        body:
+          member: "{{ updated_group_members }}"
+        body_format: json
+        validate_certs: "{{ validate_certs }}"
+        status_code: 200
+        timeout: "{{ connection_timeout }}"
+      register: group_add_result
+      retries: "{{ api_retries }}"
+      delay: "{{ api_delay }}"
+      when: group_needs_operation
+
+    - name: "🎉 Stage 3: Group Operation Success"
+      ansible.builtin.set_fact:
+        stage3_completed: true
+      when: 
+        - group_needs_operation
+        - group_add_result.status == 200
+
+    - name: "✅ Stage 3: Group Operation Success Message"
+      ansible.builtin.debug:
+        msg: |
+          ✅ 階段3: Address Group Member 加入操作成功
+          
+          配置詳情:
+          - Group Name: {{ group_name }}
+          - 新增Member: {{ address_name }}
+          - 原Members數: {{ original_group_members | length }}
+          - 新Members數: {{ updated_group_members | length }}
+      when: stage3_completed
+
+    - name: "❌ Stage 3: Group Operation Failed - Initiating Full Rollback"
+      block:
+        - name: "🔄 Rollback Stage 2: Delete Address Object"
+          ansible.builtin.uri:
+            url: "https://{{ fortigate_host }}/api/v2/cmdb/firewall/address/{{ address_name }}"
+            method: DELETE
+            headers:
+              Authorization: "Bearer {{ fortigate_token }}"
+            validate_certs: "{{ validate_certs }}"
+            status_code: [200, 404]
+            timeout: "{{ connection_timeout }}"
+          register: address_rollback_result
+          when: stage2_completed
+          ignore_errors: true
+
+        - name: "🔄 Rollback Stage 1: Delete DHCP Reserved Address"
+          ansible.builtin.uri:
+            url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ server_id }}/reserved-address/{{ dhcp_target_id }}"
+            method: DELETE
+            headers:
+              Authorization: "Bearer {{ fortigate_token }}"
+            validate_certs: "{{ validate_certs }}"
+            status_code: [200, 404]
+            timeout: "{{ connection_timeout }}"
+          register: dhcp_rollback_result
+          vars:
+            dhcp_target_id: "{{ dhcp_existing_object.id if dhcp_operation_type == 'UPDATE' else (dhcp_create_result.json.mkey if dhcp_create_result is defined else '') }}"
+          when: stage1_completed
+          ignore_errors: true
+
+        - name: "❌ Stage 3 Failed with Full Rollback Status"
+          ansible.builtin.fail:
+            msg: |
+              ❌ 階段3: Address Group Member 加入操作失敗
+              
+              錯誤詳情:
+              - HTTP狀態: {{ group_add_result.status | default('未知') }}
+              - 錯誤訊息: {{ group_add_result.json.cli_error | default(['未知']) | join(', ') }}
+              
+              完整回滾狀態:
+              {% if stage2_completed %}
+              - 階段2 Address Object回滾: {{ '✅成功' if address_rollback_result.status in [200, 404] else '❌失敗' }}
+              {% endif %}
+              {% if stage1_completed %}
+              - 階段1 DHCP配置回滾: {{ '✅成功' if dhcp_rollback_result.status in [200, 404] else '❌失敗' }}
+              {% endif %}
+      when: 
+        - group_needs_operation
+        - group_add_result.status != 200
 
     # ==================== 操作後驗證區塊 ====================
     - name: "🔍 Post-execution Verification Section Header"
       ansible.builtin.debug:
-        msg: "==================== 操作後驗證 ===================="
-      when: needs_operation
+        msg: "==================== 三階段操作後驗證 ===================="
+      when: stage1_completed or stage2_completed or stage3_completed
 
-    - name: "🔍 Verify Operation Result"
+    - name: "🔍 Verify Stage 1: DHCP Configuration"
       ansible.builtin.uri:
         url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ server_id }}/reserved-address?filter=ip=={{ target_ip }}"
         method: GET
@@ -299,68 +472,124 @@
         validate_certs: "{{ validate_certs }}"
         status_code: 200
         timeout: "{{ connection_timeout }}"
-      register: post_verification
+      register: dhcp_verification
       retries: "{{ api_retries }}"
       delay: "{{ api_delay }}"
-      when: 
-        - needs_operation
-        - (create_result.status == 200 if operation_type == 'CREATE' else update_result.status == 200)
+      when: stage1_completed
 
-- name: "✅ Operation Verification Result"
+    - name: "🔍 Verify Stage 2: Address Object"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/firewall/address/{{ address_name }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_token }}"
+        validate_certs: "{{ validate_certs }}"
+        status_code: [200, 404]
+        timeout: "{{ connection_timeout }}"
+      register: address_verification
+      retries: "{{ api_retries }}"
+      delay: "{{ api_delay }}"
+      when: stage2_completed
+
+    - name: "🔍 Verify Stage 3: Address Group"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/firewall/addrgrp/{{ group_name }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_token }}"
+        validate_certs: "{{ validate_certs }}"
+        status_code: 200
+        timeout: "{{ connection_timeout }}"
+      register: group_verification
+      retries: "{{ api_retries }}"
+      delay: "{{ api_delay }}"
+      when: stage3_completed
+
+    - name: "✅ Three-Stage Verification Results"
       ansible.builtin.debug:
-        msg: "✅ 操作驗證通過 | 找到配置: {{ post_verification.json.results | length }} 筆 | 當前MAC: {{ (post_verification.json.results | first).mac }} | 當前描述: {{ (post_verification.json.results | first).description }}"
-      when: 
-        - needs_operation
-        - post_verification is defined
-        - post_verification.json.results | length > 0
+        msg: |
+          ✅ 三階段操作驗證結果
+          
+          {% if stage1_completed and dhcp_verification is defined %}
+          階段1 (DHCP): ✅驗證通過 | 找到配置: {{ dhcp_verification.json.results | length }} 筆
+          {% endif %}
+          {% if stage2_completed and address_verification is defined %}
+          階段2 (Address): {{ '✅驗證通過' if address_verification.status == 200 else '⚠️未找到配置' }}
+          {% endif %}
+          {% if stage3_completed and group_verification is defined %}
+          階段3 (Group): ✅驗證通過 | Members數: {{ (group_verification.json.results | first).member | length }} | Address已加入: {{ address_name in (group_verification.json.results | first).member | map(attribute='name') | list }}
+          {% endif %}
 
     # ==================== 最終摘要區塊 ====================
     - name: "📊 Final Summary Section Header"
       ansible.builtin.debug:
-        msg: "==================== 最終摘要 ===================="
+        msg: "==================== 三階段操作最終摘要 ===================="
 
-    - name: "📊 Operation Results Summary"
+    - name: "📊 Three-Stage Operation Results Summary"
       ansible.builtin.debug:
         msg: |
-          📊 {{ operation_type }}操作結果摘要
+          📊 三階段整合操作結果摘要
           
-          基本資訊:
+          目標配置:
           - IP地址: {{ target_ip }}
           - MAC地址: {{ target_mac }}
-          - 執行狀態: {{ operation_status }}
+          - 描述: {{ target_description }}
+          - Address名稱: {{ address_name }}
+          - Group名稱: {{ group_name }}
           
-          {% if needs_operation and operation_type == 'CREATE' and create_result.status == 200 %}
-          ✅ 新配置已成功創建
-          {% elif needs_operation and operation_type == 'UPDATE' and update_result.status == 200 %}
-          ✅ 既有配置已成功更新
-          {% elif not needs_operation %}
-          ℹ️ 配置已是最新狀態，無需變更
-          {% else %}
-          ❌ 操作執行失敗，請檢查錯誤訊息
-          {% endif %}
+          執行結果:
+          - 階段1 (DHCP): {{ stage1_status }}
+          - 階段2 (Address Object): {{ stage2_status }}
+          - 階段3 (Address Group): {{ stage3_status }}
+          
+          {{ overall_status }}
       vars:
-        operation_status: >-
-          {%- if not needs_operation -%}
-            ℹ️無需變更
-          {%- elif operation_type == 'CREATE' and create_result.status == 200 -%}
-            ✅創建成功
-          {%- elif operation_type == 'UPDATE' and update_result.status == 200 -%}
-            ✅更新成功
+        stage1_status: >-
+          {%- if not dhcp_needs_operation -%}
+            ⏭️跳過
+          {%- elif stage1_completed -%}
+            ✅{{ dhcp_operation_type }}成功
           {%- else -%}
-            ❌操作失敗
+            ❌失敗
+          {%- endif -%}
+        stage2_status: >-
+          {%- if not address_needs_operation -%}
+            ⏭️跳過
+          {%- elif stage2_completed -%}
+            ✅{{ address_operation_type }}成功
+          {%- else -%}
+            ❌失敗
+          {%- endif -%}
+        stage3_status: >-
+          {%- if not group_needs_operation -%}
+            ⏭️跳過
+          {%- elif stage3_completed -%}
+            ✅ADD_MEMBER成功
+          {%- else -%}
+            ❌失敗
+          {%- endif -%}
+        overall_status: >-
+          {%- if stage1_completed and stage2_completed and stage3_completed -%}
+            🎉 所有階段操作成功完成！FortiGate整合配置已就緒。
+          {%- elif not dhcp_needs_operation and not address_needs_operation and not group_needs_operation -%}
+            ℹ️ 所有配置已是最新狀態，無需執行任何操作。
+          {%- else -%}
+            ⚠️ 部分階段執行失敗，已執行相應的回滾操作。
           {%- endif -%}
 
-    - name: "📊 Configuration Details"
+    - name: "📊 Environment Configuration Details"
       ansible.builtin.debug:
         msg: |
-          📊 配置環境資訊
+          📊 環境配置詳情
           
           DHCP Server: {{ server_id }} ({{ server_info.dhcp_description | default('N/A') }})
-          描述資訊: {{ target_description }}
+          Address Group: {{ group_name }}
           {% if backup_info.timestamp is defined %}
           備份時間: {{ backup_info.timestamp }}
           {% endif %}
+          執行模式: 三階段整合自動化
+          版本: v1.0
 
     - name: "📅 Completion Information"
       ansible.builtin.debug:
-        msg: "📅 完成時間: {{ ansible_date_time.iso8601 }} | 版本: v1.0"
+        msg: "📅 完成時間: {{ ansible_date_time.iso8601 }} | 三階段整合操作 | 版本: v1.0"
