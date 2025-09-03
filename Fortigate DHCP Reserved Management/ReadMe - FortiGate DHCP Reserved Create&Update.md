@@ -665,9 +665,6 @@ fortigate-awx-playbooks-v2.1/
 2. **錯誤分析**: 建立錯誤統計和分析機制
 3. **性能監控**: 監控API響應時間和成功率
 
-## 🤝 貢獻指南
-
-歡迎提交 Issue 和 Pull Request 來改善此專案。
 
 ### 開發規範
 - 遵循現有的命名規範
@@ -675,18 +672,6 @@ fortigate-awx-playbooks-v2.1/
 - 提供完整的測試案例
 - 更新相關文檔
 
-## 📞 技術支援
-
-如有問題或建議，請：
-- 📧 提交 GitHub Issue
-- 📝 查看 [Wiki 文檔](wiki-link)
-- 💬 聯繫維護團隊
-
 ---
 
 **版本**: v2.1  
-**最後更新**: 2024-01-01  
-**維護者**: Network Automation Team  
-**授權**: MIT License
-
-
