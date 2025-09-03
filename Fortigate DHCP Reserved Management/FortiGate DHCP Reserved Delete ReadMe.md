@@ -128,29 +128,6 @@ ansible_command_timeout: "{{ fortigate_timeout | default('30') }}"
 描述還原: "Reserved"
 ```
 
-#### Firewall Address 處理邏輯
-**Address Group 結構範例:**
-```bash
-config firewall addrgrp
-    edit "Group_22_FIC_Allow-MAC"
-        set member "MAC_Chiachi_NB_WLAN" "MAC_Barz_NB_WLAN" "MAC_Ian.su_NB_WLAN"
-    next
-    edit "Group_40_PC-Allow-MAC" 
-        set member "MAC_test_PC_WLAN" "MAC_other_device"
-    next
-end
-```
-
-**Address Object 格式:**
-```bash
-config firewall address
-    edit "MAC_test_PC_WLAN"
-        set type mac
-        set comment "172.23.22.170"
-        set macaddr "00:11:22:33:44:55"
-    next
-end
-```
 
 ### 2.2 Survey 設計邏輯
 
