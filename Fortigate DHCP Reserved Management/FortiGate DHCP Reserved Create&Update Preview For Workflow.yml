@@ -1,13 +1,13 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address Create&Update + Firewall Address Management Preview v2.0
+# FortiGate DHCP Reserved Address Create&Update + Firewall Address Management Preview v2.1
 # 用途：預覽DHCP Reserved Address + Firewall Address Object + Address Group的三階段操作
 # 功能：智能檢測衝突、分析現有配置、判斷操作類型、驗證IP範圍、Address重複檢查
 # 輸出：顯示三階段配置變更預覽，設定workflow變數
-# 版本：v2.0 - 修正變數引用問題，整合三階段自動化功能
+# 版本：v2.1 - 修正輸出斷行問題，統一命名規範
 # =============================================================================
 
-- name: FortiGate DHCP + Firewall Address Management Preview For Workflow v2.0
+- name: FortiGate DHCP + Firewall Address Management Preview For Workflow v2.1
   hosts: localhost
   connection: local
   gather_facts: true
@@ -183,12 +183,12 @@
     # ==================== 預覽資訊顯示 ====================
     - name: "📋 Three-Stage Preview Information Header"
       ansible.builtin.debug:
-        msg: "==================== FortiGate DHCP + Firewall Address Management Preview v2.0 ===================="
+        msg: "==================== FortiGate DHCP Reserved Create&Update Preview v2.1 ===================="
 
     - name: "📋 Three-Stage Preview Parameters Summary"
       ansible.builtin.debug:
         msg: |
-          🔍 三階段整合預覽模式 v2.0
+          🔍 三階段整合預覽模式 v2.1
           
           輸入參數:
           - 目標IP: {{ target_ip }}
@@ -422,7 +422,7 @@
     - name: "📊 Integrated Operations Summary"
       ansible.builtin.debug:
         msg: |
-          📊 三階段操作總覽 v2.0
+          📊 三階段操作總覽 v2.1
           
           階段1 (DHCP): {{ '✅需要執行' if dhcp_needs_operation else '⏭️跳過' }} ({{ dhcp_operation_type }})
           階段2 (Address): {{ '✅需要執行' if address_needs_operation else '⏭️跳過' }} ({{ address_operation_type }})
@@ -434,7 +434,7 @@
     - name: "ℹ️ No Operations Required"
       ansible.builtin.debug:
         msg: |
-          ℹ️ 所有階段檢查完成 v2.0
+          ℹ️ 所有階段檢查完成 v2.1
           
           目前所有配置都已符合目標狀態，無需執行任何變更操作:
           - DHCP Reserved Address: 已正確配置
@@ -473,14 +473,14 @@
           ip_range:
             start: "{{ ip_range_start }}"
             end: "{{ ip_range_end }}"
-          purpose: "記錄三階段操作前的原始配置狀態 v2.0"
+          purpose: "記錄三階段操作前的原始配置狀態 v2.1"
       when: backup_enabled
 
     # ==================== 操作警告 ====================
     - name: "⚠️ Three-Stage Configuration Change Warning"
       ansible.builtin.debug:
         msg: |
-          ⚠️ 三階段操作警告 v2.0
+          ⚠️ 三階段操作警告 v2.1
           
           此操作將依序執行以下配置變更：
           {% if dhcp_needs_operation %}
@@ -503,7 +503,7 @@
 
     - name: "⏱️ Preview Time Summary"
       ansible.builtin.debug:
-        msg: "⏱️ 預覽用時: {{ preview_time_used }}s | 版本: v2.0"
+        msg: "⏱️ 預覽用時: {{ preview_time_used }}s | 版本: v2.1"
 
     # ==================== Workflow 變數設定 ====================
     - name: "📤 Set Three-Stage Workflow Variables"
@@ -534,12 +534,12 @@
           wf_server_info: "{{ server_info | to_json }}"
           wf_backup_info: "{{ three_stage_backup_info | default({}) | to_json }}"
           wf_three_stage_operations: true
-          wf_preview_version: "v2.0"
+          wf_preview_version: "v2.1"
 
     - name: "🎯 Three-Stage Preview Complete"
       ansible.builtin.debug:
         msg: |
-          🎯 三階段整合預覽完成 | 版本: v2.0
+          🎯 三階段整合預覽完成 | 版本: v2.1
           
           摘要:
           - 階段1 (DHCP): {{ dhcp_operation_type }} | {{ '需要執行' if dhcp_needs_operation else '跳過' }}
