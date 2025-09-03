@@ -493,6 +493,67 @@ extra_vars:
 | **描述** | Address Object名稱的一部分 | `test_PC_WLAN` | 1-64 字元 |
 | **DHCP Server ID** | 2(vlan40_PC) 或 12(vlan22_FIC_WAN) | `12` | 必須在 ["2", "12"] |
 
+```yaml
+survey_spec:
+  name: "FortiGate DHCP Reserved Create&Update v2.1"
+  description: "三階段整合管理：創建或更新 DHCP Reserved Address + Firewall Address Object + Address Group"
+  spec:
+    - question_name: "輸入目標IP地址"
+      question_description: |
+        請輸入要配置的IP地址，必須在對應DHCP Server的範圍內：
+        - Server ID 2 (vlan40_PC): 請確認IP在正確範圍內
+        - Server ID 12 (vlan22_FIC_WAN): 請確認IP在正確範圍內
+        
+        格式: xxx.xxx.xxx.xxx
+        範例: 192.168.40.100
+        注意：系統會在Preview階段驗證IP範圍
+      required: true
+      type: "text"
+      variable: "ip_param"
+      min: 7
+      max: 15
+      
+    - question_name: "輸入MAC地址"
+      question_description: |
+        請輸入MAC地址，支援格式：
+        - xx:xx:xx:xx:xx:xx (冒號分隔)
+        - xx-xx-xx-xx-xx-xx (連字號分隔)
+        範例: 00:11:22:33:44:55
+        
+        注意：此MAC將用於DHCP和Firewall Address配置
+      required: true
+      type: "text"
+      variable: "mac_param"
+      min: 17
+      max: 17
+      
+    - question_name: "輸入描述信息"
+      question_description: |
+        請輸入配置的描述信息
+        範例: Test_PC_WLAN, User_John_PC, Server_Web01等
+        
+        注意：此描述將作為Address Object名稱的一部分 (MAC_描述)
+      required: true
+      type: "text"
+      variable: "desc_param"
+      min: 1
+      max: 64
+      
+    - question_name: "選擇DHCP Server ID"
+      question_description: |
+        選擇對應的DHCP Server:
+        - ID 2: vlan40_PC → Address Group: Group_40_PC-Allow-MAC
+        - ID 12: vlan22_FIC_WAN → Address Group: Group_22_FIC_Allow-MAC
+        
+        選擇的Server ID將決定Address加入的Group
+      required: true
+      type: "multiplechoice"
+      variable: "server_id"
+      choices:
+        - "2"
+        - "12"
+```
+
 ## 🔧 Server ID 對應關係
 
 | Server ID | 描述 | Address Group | IP 範圍檢查 |
