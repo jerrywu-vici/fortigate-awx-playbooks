@@ -1,14 +1,14 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address Create&Update + Firewall Address Management Execute v2.0
+# FortiGate DHCP Reserved Address Create&Update + Firewall Address Management Execute v2.1
 # 用途：執行三階段操作：DHCP + Address Object + Address Group
 # 功能：依序執行三階段操作，具備完整的錯誤處理和回滾機制
 # 輸入：接收Preview步驟的workflow變數
 # 輸出：三階段執行結果和操作摘要
-# 版本：v2.0 - 修正錯誤處理，整合三階段自動化執行
+# 版本：v2.1 - 修正輸出斷行問題，統一命名規範
 # =============================================================================
 
-- name: FortiGate DHCP + Firewall Address Management Execute For Workflow v2.0
+- name: FortiGate DHCP + Firewall Address Management Execute For Workflow v2.1
   hosts: localhost
   connection: local
   gather_facts: true
@@ -96,12 +96,12 @@
           ❌ 非三階段操作模式
           
           此Execute Playbook專為三階段操作設計
-          請確認使用正確的Preview Playbook v2.0
+          請確認使用正確的Preview Playbook v2.1
       when: not three_stage_operations
 
     - name: "🔍 Version Compatibility Check"
       ansible.builtin.debug:
-        msg: "🔍 版本檢查 | Preview版本: {{ preview_version }} | Execute版本: v2.0 | 相容性: {{ '✅' if preview_version in ['v2.0'] else '⚠️' }}"
+        msg: "🔍 版本檢查 | Preview版本: {{ preview_version }} | Execute版本: v2.1 | 相容性: {{ '✅' if preview_version in ['v2.1'] else '⚠️' }}"
 
     # ==================== API 連接驗證 ====================
     - name: "🔌 Test FortiGate API Connection"
@@ -126,12 +126,12 @@
     # ==================== 執行資訊顯示 ====================
     - name: "📋 Three-Stage Execution Information Header"
       ansible.builtin.debug:
-        msg: "==================== FortiGate DHCP + Firewall Address Management Execute v2.0 ===================="
+        msg: "==================== FortiGate DHCP Reserved Create&Update Execute v2.1 ===================="
 
     - name: "🚀 Execute Parameters Summary"
       ansible.builtin.debug:
         msg: |
-          🚀 三階段整合執行模式 v2.0 | 已通過人工確認
+          🚀 三階段整合執行模式 v2.1 | 已通過人工確認
           
           基本參數:
           - IP: {{ target_ip }}
@@ -147,7 +147,7 @@
     - name: "📊 Operations Overview"
       ansible.builtin.debug:
         msg: |
-          📊 操作概覽 v2.0
+          📊 操作概覽 v2.1
           
           DHCP Server: {{ server_info.dhcp_description | default('N/A') }}
           Address Object: {{ address_name }}
@@ -158,7 +158,7 @@
     - name: "ℹ️ No Operations Required"
       ansible.builtin.debug:
         msg: |
-          ℹ️ 所有階段都無需執行操作 v2.0
+          ℹ️ 所有階段都無需執行操作 v2.1
           
           當前配置已符合目標狀態:
           - DHCP Reserved Address: 已正確配置
@@ -541,7 +541,7 @@
     - name: "✅ Three-Stage Verification Results"
       ansible.builtin.debug:
         msg: |
-          ✅ 三階段操作驗證結果 v2.0
+          ✅ 三階段操作驗證結果 v2.1
           
           {% if stage1_completed and dhcp_verification is defined %}
           階段1 (DHCP): ✅驗證通過 | 找到配置: {{ dhcp_verification.json.results | length }} 筆
@@ -560,7 +560,7 @@
 
     - name: "⏱️ Execution Time Summary"
       ansible.builtin.debug:
-        msg: "⏱️ 執行用時: {{ execution_time_used }}s | 版本: v2.0"
+        msg: "⏱️ 執行用時: {{ execution_time_used }}s | 版本: v2.1"
 
     # ==================== 最終摘要區塊 ====================
     - name: "📊 Final Summary Section Header"
@@ -570,7 +570,7 @@
     - name: "📊 Three-Stage Operation Results Summary"
       ansible.builtin.debug:
         msg: |
-          📊 三階段整合操作結果摘要 v2.0
+          📊 三階段整合操作結果摘要 v2.1
           
           目標配置:
           - IP地址: {{ target_ip }}
@@ -622,7 +622,7 @@
     - name: "📊 Environment Configuration Details"
       ansible.builtin.debug:
         msg: |
-          📊 環境配置詳情 v2.0
+          📊 環境配置詳情 v2.1
           
           DHCP Server: {{ server_id }} ({{ server_info.dhcp_description | default('N/A') }})
           Address Group: {{ group_name }}
@@ -630,8 +630,8 @@
           備份時間: {{ backup_info.timestamp }}
           {% endif %}
           執行模式: 三階段整合自動化
-          版本: v2.0
+          版本: v2.1
 
     - name: "📅 Completion Information"
       ansible.builtin.debug:
-        msg: "📅 完成時間: {{ ansible_date_time.iso8601 }} | 三階段整合操作 | 版本: v2.0"
+        msg: "📅 完成時間: {{ ansible_date_time.iso8601 }} | 三階段整合操作 | 版本: v2.1"
