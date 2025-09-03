@@ -1,0 +1,101 @@
+---
+- name: Query FortiGate Unused Firewall Policies with Export
+  hosts: localhost
+  gather_facts: false
+  vars:
+    # ... 其他變數保持不變 ...
+    
+  tasks:
+    # ... 前面的查詢邏輯保持不變 ...
+
+    # =================== 檔案匯出（AWX Artifacts方式） ===================
+    - name: 建立artifacts目錄
+      file:
+        path: "{{ playbook_dir }}/artifacts"
+        state: directory
+      when: export_to_file | default(false) | bool
+
+    - name: 匯出CSV格式報告
+      copy:
+        content: |
+          # FortiGate Unused Policy Report
+          # Generated: {{ ansible_date_time.iso8601 }}
+          # VDOM: {{ vdom_name | default('root') }}
+          # Threshold: {{ months_threshold | default('6') }} months
+          # Total Policies: {{ total_policies }}
+          # Unused Policies Found: {{ filtered_unused_policies | length }}
+          
+          policy_id,name,status,action,last_used,days_since_last_used,hit_count,bytes,packets,srcintf,dstintf,srcaddr,dstaddr,service,comments
+          {% for policy in filtered_unused_policies %}
+          {{ policy.policy_id }},"{{ policy.name | replace('"', '""') }}",{{ policy.status }},{{ policy.action }},{{ policy.last_used_readable }},{{ policy.days_since_last_used }},{{ policy.hit_count }},{{ policy.bytes }},{{ policy.packets }},"{{ policy.srcintf | join(';') }}","{{ policy.dstintf | join(';') }}","{{ policy.srcaddr | join(';') }}","{{ policy.dstaddr | join(';') }}","{{ policy.service | join(';') }}","{{ policy.comments | replace('"', '""') }}"
+          {% endfor %}
+        dest: "{{ playbook_dir }}/artifacts/unused_policies_{{ ansible_date_time.epoch }}.csv"
+      when: export_to_file | default(false) | bool
+
+    - name: 匯出JSON格式報告
+      copy:
+        content: |
+          {
+            "report_info": {
+              "generated_at": "{{ ansible_date_time.iso8601 }}",
+              "vdom": "{{ vdom_name | default('root') }}",
+              "threshold_months": {{ months_threshold | default('6') }},
+              "total_policies": {{ total_policies }},
+              "unused_policies_count": {{ filtered_unused_policies | length }}
+            },
+            "unused_policies": {{ filtered_unused_policies | to_nice_json }}
+          }
+        dest: "{{ playbook_dir }}/artifacts/unused_policies_{{ ansible_date_time.epoch }}.json"
+      when: export_to_file | default(false) | bool
+
+    - name: 產生清理CLI腳本
+      copy:
+        content: |
+          #!/bin/bash
+          # FortiGate Policy Cleanup Script
+          # Generated: {{ ansible_date_time.iso8601 }}
+          # 
+          # 注意：請在執行前仔細檢查每個Policy的用途
+          # 建議先在測試環境執行
+          
+          echo "=== FortiGate Policy Cleanup Commands ==="
+          echo "請將以下命令貼到FortiGate CLI中執行："
+          echo ""
+          
+          echo "# 停用長期未使用的Policy:"
+          echo "config firewall policy"
+          {% for policy in (filtered_unused_policies | rejectattr('is_never_used', 'equalto', true) | selectattr('is_enabled', 'equalto', true) | list) %}
+          echo "    edit {{ policy.policy_id }}"
+          echo "        set status disable"
+          echo "        set comments \"{{ policy.comments | replace('"', '\\"') }} [DISABLED-{{ ansible_date_time.date }}-UNUSED-{{ policy.days_since_last_used }}DAYS]\""
+          echo "    next"
+          {% endfor %}
+          echo "end"
+          echo ""
+          
+          echo "# 備份用途 - 刪除從未使用Policy的命令（謹慎使用）:"
+          echo "config firewall policy"
+          {% for policy in (filtered_unused_policies | selectattr('is_never_used', 'equalto', true) | list) %}
+          echo "    # delete {{ policy.policy_id }}  # Policy: {{ policy.name | replace('"', '\\"') }}"
+          {% endfor %}
+          echo "end"
+          echo ""
+          echo "註：建議先停用Policy觀察一段時間，確認無影響後再刪除"
+        dest: "{{ playbook_dir }}/artifacts/cleanup_commands_{{ ansible_date_time.epoch }}.sh"
+        mode: '0755'
+      when: 
+        - export_to_file | default(false) | bool
+        - filtered_unused_policies | length > 0
+
+    - name: 顯示artifacts檔案位置
+      debug:
+        msg: |
+          ========= 匯出檔案完成 =========
+          檔案已儲存到AWX artifacts目錄:
+          - unused_policies_{{ ansible_date_time.epoch }}.csv
+          - unused_policies_{{ ansible_date_time.epoch }}.json
+          - cleanup_commands_{{ ansible_date_time.epoch }}.sh
+          
+          您可以在AWX Job詳情頁面的"Artifacts"區塊下載這些檔案
+          =============================
+      when: export_to_file | default(false) | bool
