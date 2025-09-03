@@ -471,7 +471,79 @@ extra_vars:
 | **Preview** | `FortiGate DHCP Reserved Create&Update - Preview` | `FortiGate DHCP Reserved Create&Update Preview For Workflow.yml` |
 | **Execute** | `FortiGate DHCP Reserved Create&Update - Execute` | `FortiGate DHCP Reserved Create&Update Execute For Workflow.yml` |
 
+```yaml
+# Preview Job Template (固定名稱)
+Name: "FortiGate DHCP Reserved Create&Update - Preview"
+Playbook: "FortiGate DHCP Reserved Create&Update Preview For Workflow.yml"
+Project: "FortiGate Automation Project"
+Inventory: "FortiGate Inventory"
+Credentials: "FortiGate Production"
+Description: "三階段操作預覽 v2.1：DHCP + Address Object + Address Group"
+Survey: Disabled (使用Workflow Survey)
+Timeout: 300 seconds
+
+# Execute Job Template (固定名稱)
+Name: "FortiGate DHCP Reserved Create&Update - Execute"
+Playbook: "FortiGate DHCP Reserved Create&Update Execute For Workflow.yml"
+Project: "FortiGate Automation Project"
+Inventory: "FortiGate Inventory"
+Credentials: "FortiGate Production"
+Description: "三階段操作執行 v2.1：DHCP + Address Object + Address Group，具備完整回滾機制"
+Survey: Disabled (接收Workflow變數)
+Timeout: 600 seconds
+```
+
 ### Workflow Template 設定
+
+```yaml
+Name: "Workflow-FortiGate DHCP Reserved Create&Update"
+Description: "整合的三階段自動化管理 v2.1：DHCP Reserved Address + Firewall Address Object + Address Group"
+Organization: "Network Operations"
+Inventory: "FortiGate Inventory"
+Survey: 保持原有 Survey 設計
+
+# Workflow Nodes 設定
+## Node 1: Preview Job
+Job Template: "FortiGate DHCP Reserved Create&Update - Preview"
+Node Type: Job Template
+Convergence: Any
+All Parents Must Converge: No
+
+## Node 2: Approval Node
+Node Type: Approval
+Name: "確認三階段配置變更 v2.1"
+Description: |
+  請仔細檢視三階段操作預覽結果 (v2.1)，確認以下資訊：
+  
+  階段1 - DHCP Reserved Address:
+  1. 操作類型 (CREATE/UPDATE)
+  2. 目標IP和MAC地址是否正確
+  3. IP範圍驗證結果
+  4. 是否有MAC衝突
+  
+  階段2 - Firewall Address Object:
+  1. Address Object名稱 (MAC_描述)
+  2. 是否有重複的Address Object
+  3. Comment和MAC地址設定
+  
+  階段3 - Address Group Member:
+  1. 目標Address Group名稱
+  2. Address是否已在Group中
+  3. Group成員數量變化
+  
+  ⚠️ 重要提醒 v2.1：
+  - 後續階段失敗會自動回滾前面已完成的配置！
+  - 已修正所有輸出斷行問題
+  - 統一命名規範，便於維護管理
+  - 確認所有參數正確後再批准執行
+Timeout: 1800 seconds (30 minutes)
+
+## Node 3: Execute Job
+Job Template: "FortiGate DHCP Reserved Create&Update - Execute"
+Node Type: Job Template
+Convergence: Any
+All Parents Must Converge: No
+```
 
 **固定名稱**: `Workflow-FortiGate DHCP Reserved Create&Update`
 
