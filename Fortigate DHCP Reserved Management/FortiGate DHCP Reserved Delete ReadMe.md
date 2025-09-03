@@ -383,7 +383,6 @@ fortigate-awx-playbooks/
 - **Ansible Collection**: fortinet.fortios (最新版)
 - **Python**: 3.8+
 - **Playbook 版本**: v6.0
-- **最後更新**: 2024-01-01
 
 ---
 
