@@ -1,13 +1,13 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address Create&Update Preview v1.0
-# 用途：預覽DHCP Reserved Address的創建或更新操作
-# 功能：智能檢測衝突、分析現有配置、判斷操作類型、驗證IP範圍
-# 輸出：顯示配置變更預覽，設定workflow變數
-# 版本：v1.0 - 統一設計架構，優化輸出格式
+# FortiGate DHCP Reserved Address Create&Update + Firewall Address Management Preview v1.0
+# 用途：預覽DHCP Reserved Address + Firewall Address Object + Address Group的三階段操作
+# 功能：智能檢測衝突、分析現有配置、判斷操作類型、驗證IP範圍、Address重複檢查
+# 輸出：顯示三階段配置變更預覽，設定workflow變數
+# 版本：v1.0 - 整合三階段自動化功能
 # =============================================================================
 
-- name: FortiGate DHCP Reserved Create&Update Preview For Workflow v1.0
+- name: FortiGate DHCP + Firewall Address Management Preview For Workflow v1.0
   hosts: localhost
   connection: local
   gather_facts: true
@@ -19,12 +19,14 @@
     target_description: "{{ desc_param }}"
     target_dhcp_server_id: "{{ server_id }}"
     
-    # Server ID 對應關係 (僅保留使用的2和12)
+    # Server ID 對應關係 (新增 Address Group 對應)
     server_mapping:
       "2":
         dhcp_description: "vlan40_PC"
+        address_group: "Group_40_PC-Allow-MAC"
       "12":
         dhcp_description: "vlan22_FIC_WAN"
+        address_group: "Group_22_FIC_Allow-MAC"
     
     # API 連接參數
     api_retries: "{{ fortigate_api_retries | default('3') | int }}"
@@ -82,6 +84,8 @@
     - name: "🔧 Set Server Mapping Information"
       ansible.builtin.set_fact:
         server_info: "{{ server_mapping[target_dhcp_server_id] }}"
+        target_address_group: "{{ server_mapping[target_dhcp_server_id].address_group }}"
+        target_address_name: "MAC_{{ target_description }}"
 
     - name: "🔍 Validate IP Address Format"
       ansible.builtin.set_fact:
@@ -172,18 +176,31 @@
       when: not ip_in_range
 
     # ==================== 預覽資訊顯示 ====================
-    - name: "📋 Preview Information Header"
+    - name: "📋 Three-Stage Preview Information Header"
       ansible.builtin.debug:
-        msg: "==================== FortiGate DHCP Reserved Create&Update Preview v1.0 ===================="
+        msg: "==================== FortiGate DHCP + Firewall Address Management Preview v1.0 ===================="
 
-    - name: "📋 Preview Parameters Summary"
+    - name: "📋 Three-Stage Preview Parameters Summary"
       ansible.builtin.debug:
-        msg: "🔍 Create&Update預覽模式 | 目標IP: {{ target_ip }} | 目標MAC: {{ normalized_mac }} | 描述: {{ target_description }} | DHCP Server: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }}) | IP範圍: {{ ip_range_start }}-{{ ip_range_end }}"
+        msg: |
+          🔍 三階段整合預覽模式
+          
+          輸入參數:
+          - 目標IP: {{ target_ip }}
+          - 目標MAC: {{ normalized_mac }}
+          - 描述: {{ target_description }}
+          - DHCP Server: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }})
+          - IP範圍: {{ ip_range_start }}-{{ ip_range_end }}
+          
+          三階段操作:
+          - 階段1: DHCP Reserved Address
+          - 階段2: Firewall Address Object ({{ target_address_name }})
+          - 階段3: Address Group Member ({{ target_address_group }})
 
-    # ==================== DHCP 配置分析區塊 ====================
-    - name: "📊 DHCP Configuration Analysis Section Header"
+    # ==================== 階段1: DHCP 配置分析區塊 ====================
+    - name: "📊 Stage 1: DHCP Configuration Analysis Section Header"
       ansible.builtin.debug:
-        msg: "==================== DHCP 配置分析 ===================="
+        msg: "==================== 階段1: DHCP 配置分析 ===================="
 
     - name: "🔍 Get Current DHCP Reserved Addresses"
       ansible.builtin.uri:
@@ -202,7 +219,7 @@
       ansible.builtin.debug:
         msg: "🔍 分析DHCP配置 | 總計: {{ existing_reservations.json.results | length }} 筆 | 目標IP: {{ target_ip }} | 目標MAC: {{ normalized_mac }}"
 
-    # ==================== MAC 衝突檢測區塊 ====================
+    # MAC 衝突檢測
     - name: "🔍 MAC Conflict Detection"
       ansible.builtin.set_fact:
         mac_conflict_object: "{{ item }}"
@@ -215,7 +232,7 @@
     - name: "❌ MAC Conflict Detected"
       ansible.builtin.fail:
         msg: |
-          ❌ MAC衝突檢測失敗！
+          ❌ 階段1: MAC衝突檢測失敗！
           
           衝突詳情：
           - 目標MAC: {{ normalized_mac }}
@@ -230,21 +247,21 @@
         - mac_conflict_object is defined 
         - mac_conflict_object.ip != target_ip
 
-    # ==================== IP 配置分析區塊 ====================
+    # IP 配置分析
     - name: "🔍 Find Target IP Configuration"
       ansible.builtin.set_fact:
         target_ip_objects: "{{ existing_reservations.json.results | selectattr('ip', 'equalto', target_ip) | list }}"
 
-    - name: "🎯 Determine Operation Type"
+    - name: "🎯 Determine DHCP Operation Type"
       ansible.builtin.set_fact:
-        operation_type: >-
+        dhcp_operation_type: >-
           {%- if target_ip_objects | length > 0 -%}
             UPDATE
           {%- else -%}
             CREATE
           {%- endif -%}
-        existing_object: "{{ target_ip_objects[0] if target_ip_objects | length > 0 else {} }}"
-        needs_operation: >-
+        dhcp_existing_object: "{{ target_ip_objects[0] if target_ip_objects | length > 0 else {} }}"
+        dhcp_needs_operation: >-
           {%- if target_ip_objects | length == 0 -%}
             true
           {%- else -%}
@@ -254,57 +271,219 @@
             }}
           {%- endif -%}
 
-    # ==================== 配置變更預覽區塊 ====================
-    - name: "📊 Configuration Change Preview Section Header"
+    # ==================== 階段2: Firewall Address Object 分析區塊 ====================
+    - name: "🔥 Stage 2: Firewall Address Object Analysis Section Header"
       ansible.builtin.debug:
-        msg: "==================== 配置變更預覽 ===================="
+        msg: "==================== 階段2: Firewall Address Object 分析 ===================="
 
-    - name: "📊 Operation Analysis Result"
-      ansible.builtin.debug:
-        msg: "📊 操作分析 | 操作類型: {{ operation_type }} | 需要執行: {{ '是' if needs_operation else '否' }} | 檢查配置數: {{ existing_reservations.json.results | length }}"
+    - name: "🔍 Get Current Firewall Address Objects"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/firewall/address/{{ target_address_name }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        validate_certs: "{{ validate_certs }}"
+        status_code: [200, 404]
+        timeout: "{{ connection_timeout }}"
+      register: existing_address
+      retries: "{{ api_retries }}"
+      delay: "{{ api_delay }}"
 
-    - name: "📊 Current Configuration Display"
-      ansible.builtin.debug:
-        msg: "📊 當前配置 | ID: {{ existing_object.id }} | IP: {{ existing_object.ip }} | MAC: {{ existing_object.mac }} | 描述: {{ existing_object.description | default('空白') }}"
-      when: existing_object | length > 0
+    - name: "🎯 Determine Address Object Operation Type"
+      ansible.builtin.set_fact:
+        address_exists: "{{ existing_address.status == 200 }}"
+        address_operation_type: >-
+          {%- if existing_address.status == 200 -%}
+            UPDATE
+          {%- else -%}
+            CREATE
+          {%- endif -%}
+        address_existing_object: "{{ existing_address.json.results | first if existing_address.status == 200 else {} }}"
+        address_needs_operation: >-
+          {%- if existing_address.status == 404 -%}
+            true
+          {%- else -%}
+            {{
+              (existing_address.json.results | first).comment != target_ip or
+              (existing_address.json.results | first).macaddr[0].macaddr.lower() != normalized_mac.lower()
+            }}
+          {%- endif -%}
 
-    - name: "🔄 After Operation Configuration Preview"
+    # ==================== 階段3: Address Group 分析區塊 ====================
+    - name: "👥 Stage 3: Address Group Analysis Section Header"
       ansible.builtin.debug:
-        msg: "🔄 {{ operation_type }}後預覽 | IP: {{ target_ip }} | MAC: {{ normalized_mac }} | 描述: {{ target_description }}"
-      when: needs_operation
+        msg: "==================== 階段3: Address Group 分析 ===================="
 
-    - name: "ℹ️ No Operation Required"
+    - name: "🔍 Get Address Group Configuration"
+      ansible.builtin.uri:
+        url: "https://{{ fortigate_host }}/api/v2/cmdb/firewall/addrgrp/{{ target_address_group }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        validate_certs: "{{ validate_certs }}"
+        status_code: 200
+        timeout: "{{ connection_timeout }}"
+      register: address_group_config
+      retries: "{{ api_retries }}"
+      delay: "{{ api_delay }}"
+
+    - name: "🎯 Determine Address Group Operation"
+      ansible.builtin.set_fact:
+        group_data: "{{ address_group_config.json.results | first }}"
+        current_group_members: "{{ (address_group_config.json.results | first).member }}"
+        group_member_names: "{{ (address_group_config.json.results | first).member | map(attribute='name') | list }}"
+        address_in_group: "{{ target_address_name in group_member_names }}"
+        original_group_members: "{{ (address_group_config.json.results | first).member }}"
+        updated_group_members: "{{ (address_group_config.json.results | first).member + [{'name': target_address_name}] }}"
+        group_needs_operation: "{{ target_address_name not in group_member_names }}"
+
+    # ==================== 三階段配置變更預覽區塊 ====================
+    - name: "📊 Three-Stage Configuration Change Preview Section Header"
       ansible.builtin.debug:
-        msg: "ℹ️ 配置檢查完成 | 當前配置已符合目標狀態，無需執行任何變更操作"
-      when: not needs_operation
+        msg: "==================== 三階段配置變更預覽 ===================="
+
+    - name: "📊 Stage 1: DHCP Operation Analysis"
+      ansible.builtin.debug:
+        msg: |
+          📊 階段1: DHCP 操作分析
+          
+          操作類型: {{ dhcp_operation_type }}
+          需要執行: {{ '是' if dhcp_needs_operation else '否' }}
+          檢查配置數: {{ existing_reservations.json.results | length }}
+          {% if dhcp_existing_object | length > 0 %}
+          
+          當前配置:
+          - ID: {{ dhcp_existing_object.id }}
+          - IP: {{ dhcp_existing_object.ip }}
+          - MAC: {{ dhcp_existing_object.mac }}
+          - 描述: {{ dhcp_existing_object.description | default('空白') }}
+          {% endif %}
+          {% if dhcp_needs_operation %}
+          
+          {{ dhcp_operation_type }}後預覽:
+          - IP: {{ target_ip }}
+          - MAC: {{ normalized_mac }}
+          - 描述: {{ target_description }}
+          {% endif %}
+
+    - name: "📊 Stage 2: Address Object Operation Analysis"
+      ansible.builtin.debug:
+        msg: |
+          📊 階段2: Address Object 操作分析
+          
+          Address Name: {{ target_address_name }}
+          操作類型: {{ address_operation_type }}
+          需要執行: {{ '是' if address_needs_operation else '否' }}
+          {% if address_exists %}
+          
+          當前配置:
+          - Name: {{ address_existing_object.name }}
+          - Type: {{ address_existing_object.type }}
+          - Comment: {{ address_existing_object.comment }}  
+          - MAC: {{ address_existing_object.macaddr[0].macaddr if address_existing_object.macaddr is defined else '未知' }}
+          {% endif %}
+          {% if address_needs_operation %}
+          
+          {{ address_operation_type }}後預覽:
+          - Name: {{ target_address_name }}
+          - Type: mac
+          - Comment: {{ target_ip }}
+          - MAC: {{ normalized_mac }}
+          {% endif %}
+
+    - name: "📊 Stage 3: Address Group Operation Analysis"
+      ansible.builtin.debug:
+        msg: |
+          📊 階段3: Address Group 操作分析
+          
+          Group Name: {{ target_address_group }}
+          Address在Group中: {{ '是' if address_in_group else '否' }}
+          需要執行: {{ '是' if group_needs_operation else '否' }}
+          當前Members數: {{ original_group_members | length }}
+          {% if group_needs_operation %}
+          操作後Members數: {{ updated_group_members | length }}
+          {% endif %}
+
+    # ==================== 整合操作摘要 ====================
+    - name: "📊 Integrated Operations Summary"
+      ansible.builtin.debug:
+        msg: |
+          📊 三階段操作總覽
+          
+          階段1 (DHCP): {{ '✅需要執行' if dhcp_needs_operation else '⏭️跳過' }} ({{ dhcp_operation_type }})
+          階段2 (Address): {{ '✅需要執行' if address_needs_operation else '⏭️跳過' }} ({{ address_operation_type }})
+          階段3 (Group): {{ '✅需要執行' if group_needs_operation else '⏭️跳過' }} (ADD_MEMBER)
+          
+          執行條件: 前一階段成功才執行下一階段
+          回滾機制: 後續階段失敗會回滾前面所有已完成的配置
+
+    - name: "ℹ️ No Operations Required"
+      ansible.builtin.debug:
+        msg: |
+          ℹ️ 所有階段檢查完成
+          
+          目前所有配置都已符合目標狀態，無需執行任何變更操作:
+          - DHCP Reserved Address: 已正確配置
+          - Firewall Address Object: 已正確配置  
+          - Address Group Member: 已包含目標Address
+      when: 
+        - not dhcp_needs_operation
+        - not address_needs_operation  
+        - not group_needs_operation
 
     # ==================== 配置備份記錄 ====================
-    - name: "💾 Record Original Configuration for Backup"
+    - name: "💾 Record Three-Stage Original Configuration for Backup"
       ansible.builtin.set_fact:
-        create_update_backup_info:
+        three_stage_backup_info:
           timestamp: "{{ ansible_date_time.iso8601 }}"
-          operation_type: "{{ operation_type }}"
+          stage1_dhcp:
+            operation_type: "{{ dhcp_operation_type }}"
+            needs_operation: "{{ dhcp_needs_operation }}"
+            existing_config: "{{ dhcp_existing_object | default({}) }}"
+          stage2_address:
+            operation_type: "{{ address_operation_type }}"
+            needs_operation: "{{ address_needs_operation }}"
+            existing_config: "{{ address_existing_object | default({}) }}"
+            address_name: "{{ target_address_name }}"
+          stage3_group:
+            operation_type: "ADD_MEMBER"
+            needs_operation: "{{ group_needs_operation }}"
+            group_name: "{{ target_address_group }}"
+            original_members: "{{ original_group_members | default([]) }}"
+            updated_members: "{{ updated_group_members | default([]) }}"
           target_config:
             ip: "{{ target_ip }}"
             mac: "{{ normalized_mac }}"
             description: "{{ target_description }}"
-          existing_config: "{{ existing_object | default({}) }}"
           server_info: "{{ server_info }}"
           ip_range:
             start: "{{ ip_range_start }}"
             end: "{{ ip_range_end }}"
-          needs_operation: "{{ needs_operation }}"
-          purpose: "記錄DHCP Reserved Address {{ operation_type }}前的配置狀態"
+          purpose: "記錄三階段操作前的原始配置狀態"
       when: backup_enabled
 
     # ==================== 操作警告 ====================
-    - name: "⚠️ Configuration Change Warning"
+    - name: "⚠️ Three-Stage Configuration Change Warning"
       ansible.builtin.debug:
-        msg: "⚠️ 警告：此操作將{{ '創建新的' if operation_type == 'CREATE' else '修改既有的' }}FortiGate DHCP Reserved Address配置！請在Approval Node中仔細確認後再批准執行。"
-      when: needs_operation
+        msg: |
+          ⚠️ 三階段操作警告
+          
+          此操作將依序執行以下配置變更：
+          {% if dhcp_needs_operation %}
+          1. {{ '創建新的' if dhcp_operation_type == 'CREATE' else '修改既有的' }}DHCP Reserved Address
+          {% endif %}
+          {% if address_needs_operation %}
+          2. {{ '創建新的' if address_operation_type == 'CREATE' else '修改既有的' }}Firewall Address Object
+          {% endif %}
+          {% if group_needs_operation %}
+          3. 將Address Object加入Address Group成員
+          {% endif %}
+          
+          請在Approval Node中仔細確認所有階段的變更後再批准執行！
+      when: dhcp_needs_operation or address_needs_operation or group_needs_operation
 
     # ==================== Workflow 變數設定 ====================
-    - name: "📤 Set Create&Update Workflow Variables"
+    - name: "📤 Set Three-Stage Workflow Variables"
       ansible.builtin.set_stats:
         data:
           # 目標配置變數
@@ -312,15 +491,37 @@
           wf_target_mac: "{{ normalized_mac }}"
           wf_target_description: "{{ target_description }}"
           wf_server_id: "{{ target_dhcp_server_id }}"
-          # 操作控制變數
-          wf_operation_type: "{{ operation_type }}"
-          wf_needs_operation: "{{ needs_operation }}"
-          wf_existing_object: "{{ existing_object | to_json }}"
+          # 階段1: DHCP 變數
+          wf_dhcp_operation_type: "{{ dhcp_operation_type }}"
+          wf_dhcp_needs_operation: "{{ dhcp_needs_operation }}"
+          wf_dhcp_existing_object: "{{ dhcp_existing_object | to_json }}"
+          # 階段2: Address 變數
+          wf_address_name: "{{ target_address_name }}"  
+          wf_address_operation_type: "{{ address_operation_type }}"
+          wf_address_needs_operation: "{{ address_needs_operation }}"
+          wf_address_existing_object: "{{ address_existing_object | to_json }}"
+          wf_address_exists: "{{ address_exists }}"
+          # 階段3: Group 變數
+          wf_group_name: "{{ target_address_group }}"
+          wf_group_needs_operation: "{{ group_needs_operation }}"
+          wf_address_in_group: "{{ address_in_group }}"
+          wf_original_group_members: "{{ original_group_members | default([]) | to_json }}"
+          wf_updated_group_members: "{{ updated_group_members | default([]) | to_json }}"
           # 系統資訊變數
           wf_server_info: "{{ server_info | to_json }}"
-          wf_backup_info: "{{ create_update_backup_info | default({}) | to_json }}"
+          wf_backup_info: "{{ three_stage_backup_info | default({}) | to_json }}"
+          wf_three_stage_operations: true
           wf_preview_version: "v1.0"
 
-    - name: "🎯 Create&Update Preview Complete"
+    - name: "🎯 Three-Stage Preview Complete"
       ansible.builtin.debug:
-        msg: "🎯 Create&Update預覽完成 | 操作類型: {{ operation_type }} | 需要執行: {{ '是' if needs_operation else '否' }} | IP: {{ target_ip }} | MAC: {{ normalized_mac }} | 版本: v1.0"
+        msg: |
+          🎯 三階段整合預覽完成 | 版本: v1.0
+          
+          摘要:
+          - 階段1 (DHCP): {{ dhcp_operation_type }} | {{ '需要執行' if dhcp_needs_operation else '跳過' }}
+          - 階段2 (Address): {{ address_operation_type }} | {{ '需要執行' if address_needs_operation else '跳過' }}
+          - 階段3 (Group): ADD_MEMBER | {{ '需要執行' if group_needs_operation else '跳過' }}
+          
+          目標: {{ target_ip }} | {{ normalized_mac }} | {{ target_description }}
+          等待人工確認...
