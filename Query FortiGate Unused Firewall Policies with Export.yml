@@ -1,101 +1,168 @@
 ---
-- name: Query FortiGate Unused Firewall Policies with Export
+- name: Query FortiGate Unused Firewall Policies (READ ONLY)
   hosts: localhost
   gather_facts: false
   vars:
-    # ... 其他變數保持不變 ...
+    # 明確標示為只讀模式
+    read_only_mode: true
     
   tasks:
-    # ... 前面的查詢邏輯保持不變 ...
+    # =================== 安全檢查 ===================
+    - name: 安全提醒 - 此playbook為只讀模式
+      debug:
+        msg: |
+          ⚠️  安全提醒 ⚠️
+          此playbook僅執行查詢和報告生成，不會對FortiGate進行任何變更
+          所有生成的CLI命令需要人工審查後手動執行
+          ==========================================
 
-    # =================== 檔案匯出（AWX Artifacts方式） ===================
-    - name: 建立artifacts目錄
-      file:
-        path: "{{ playbook_dir }}/artifacts"
-        state: directory
-      when: export_to_file | default(false) | bool
+    # ... 查詢邏輯保持不變 ...
 
-    - name: 匯出CSV格式報告
-      copy:
-        content: |
-          # FortiGate Unused Policy Report
-          # Generated: {{ ansible_date_time.iso8601 }}
-          # VDOM: {{ vdom_name | default('root') }}
-          # Threshold: {{ months_threshold | default('6') }} months
-          # Total Policies: {{ total_policies }}
-          # Unused Policies Found: {{ filtered_unused_policies | length }}
-          
-          policy_id,name,status,action,last_used,days_since_last_used,hit_count,bytes,packets,srcintf,dstintf,srcaddr,dstaddr,service,comments
-          {% for policy in filtered_unused_policies %}
-          {{ policy.policy_id }},"{{ policy.name | replace('"', '""') }}",{{ policy.status }},{{ policy.action }},{{ policy.last_used_readable }},{{ policy.days_since_last_used }},{{ policy.hit_count }},{{ policy.bytes }},{{ policy.packets }},"{{ policy.srcintf | join(';') }}","{{ policy.dstintf | join(';') }}","{{ policy.srcaddr | join(';') }}","{{ policy.dstaddr | join(';') }}","{{ policy.service | join(';') }}","{{ policy.comments | replace('"', '""') }}"
-          {% endfor %}
-        dest: "{{ playbook_dir }}/artifacts/unused_policies_{{ ansible_date_time.epoch }}.csv"
-      when: export_to_file | default(false) | bool
-
-    - name: 匯出JSON格式報告
-      copy:
-        content: |
-          {
-            "report_info": {
-              "generated_at": "{{ ansible_date_time.iso8601 }}",
-              "vdom": "{{ vdom_name | default('root') }}",
-              "threshold_months": {{ months_threshold | default('6') }},
-              "total_policies": {{ total_policies }},
-              "unused_policies_count": {{ filtered_unused_policies | length }}
-            },
-            "unused_policies": {{ filtered_unused_policies | to_nice_json }}
-          }
-        dest: "{{ playbook_dir }}/artifacts/unused_policies_{{ ansible_date_time.epoch }}.json"
-      when: export_to_file | default(false) | bool
-
-    - name: 產生清理CLI腳本
+    # =================== 只生成腳本，不執行 ===================
+    - name: 生成清理建議腳本（僅供參考，不會自動執行）
       copy:
         content: |
           #!/bin/bash
-          # FortiGate Policy Cleanup Script
-          # Generated: {{ ansible_date_time.iso8601 }}
-          # 
-          # 注意：請在執行前仔細檢查每個Policy的用途
-          # 建議先在測試環境執行
+          # ⚠️⚠️⚠️ 重要安全提醒 ⚠️⚠️⚠️
+          # 此腳本由AWX自動生成，僅供參考
+          # 請務必人工審查每個Policy後再執行
+          # 建議先在測試環境驗證
+          # ================================
           
-          echo "=== FortiGate Policy Cleanup Commands ==="
-          echo "請將以下命令貼到FortiGate CLI中執行："
+          echo "此腳本不會自動執行，請人工複製以下命令到FortiGate CLI"
+          echo "建議執行步驟："
+          echo "1. 仔細審查每個要停用的Policy"
+          echo "2. 先在測試環境執行"
+          echo "3. 做好備份"
+          echo "4. 分批次執行，觀察影響"
+          echo "================================"
           echo ""
           
-          echo "# 停用長期未使用的Policy:"
-          echo "config firewall policy"
+          # 以下為建議命令，請人工複製執行：
+          
+          echo "# === 第一階段：停用長期未使用的Policy ==="
           {% for policy in (filtered_unused_policies | rejectattr('is_never_used', 'equalto', true) | selectattr('is_enabled', 'equalto', true) | list) %}
+          echo "# Policy {{ policy.policy_id }}: {{ policy.name }}"
+          echo "# 最後使用: {{ policy.last_used_readable }}"
+          echo "# 未使用天數: {{ policy.days_since_last_used }}"
+          echo "# 來源: {{ policy.srcaddr | join(',') }}"
+          echo "# 目的: {{ policy.dstaddr | join(',') }}"
+          echo "# 服務: {{ policy.service | join(',') }}"
+          echo ""
+          echo "config firewall policy"
           echo "    edit {{ policy.policy_id }}"
           echo "        set status disable"
-          echo "        set comments \"{{ policy.comments | replace('"', '\\"') }} [DISABLED-{{ ansible_date_time.date }}-UNUSED-{{ policy.days_since_last_used }}DAYS]\""
+          echo "        set comments \"{{ policy.comments }} [DISABLED-{{ ansible_date_time.date }}-UNUSED-{{ policy.days_since_last_used }}DAYS]\""
           echo "    next"
-          {% endfor %}
           echo "end"
+          echo "echo 'Policy {{ policy.policy_id }} 已停用，請觀察是否有影響'"
+          echo "sleep 5"
           echo ""
+          {% endfor %}
           
-          echo "# 備份用途 - 刪除從未使用Policy的命令（謹慎使用）:"
-          echo "config firewall policy"
-          {% for policy in (filtered_unused_policies | selectattr('is_never_used', 'equalto', true) | list) %}
-          echo "    # delete {{ policy.policy_id }}  # Policy: {{ policy.name | replace('"', '\\"') }}"
-          {% endfor %}
-          echo "end"
           echo ""
-          echo "註：建議先停用Policy觀察一段時間，確認無影響後再刪除"
-        dest: "{{ playbook_dir }}/artifacts/cleanup_commands_{{ ansible_date_time.epoch }}.sh"
-        mode: '0755'
+          echo "# === 第二階段：觀察期後考慮刪除（需要額外確認） ==="
+          {% for policy in (filtered_unused_policies | selectattr('is_never_used', 'equalto', true) | list)[:5] %}
+          echo "# 從未使用的Policy {{ policy.policy_id }}: {{ policy.name }}"
+          echo "# 建議先停用觀察30天後再考慮刪除"
+          echo "# config firewall policy"
+          echo "#     delete {{ policy.policy_id }}"
+          echo "# end"
+          echo ""
+          {% endfor %}
+          
+          echo "================================"
+          echo "⚠️ 執行前請確認："
+          echo "1. 已做好設定備份"
+          echo "2. 在維護時間窗口執行"
+          echo "3. 有回復計劃"
+          echo "4. 相關人員已知悉"
+          echo "================================"
+        dest: "{{ playbook_dir }}/artifacts/MANUAL_cleanup_commands_{{ ansible_date_time.epoch }}.sh"
+        mode: '0644'  # 注意：設為只讀，防止意外執行
       when: 
         - export_to_file | default(false) | bool
         - filtered_unused_policies | length > 0
 
-    - name: 顯示artifacts檔案位置
+    - name: 生成分階段執行計劃
+      copy:
+        content: |
+          # FortiGate Policy清理執行計劃
+          # 生成時間: {{ ansible_date_time.iso8601 }}
+          # 
+          # ⚠️ 重要：此為建議執行計劃，請根據實際環境調整
+          
+          ## 第一階段：準備工作（建議執行時間：1-2天）
+          1. 備份當前設定
+             execute backup config management-station comment "pre-policy-cleanup-{{ ansible_date_time.date }}"
+          
+          2. 記錄當前Policy統計
+             get system status
+             diagnose firewall iprope show 100000
+          
+          ## 第二階段：停用高風險Policy（建議執行時間：3-7天）
+          # 先停用從未使用過的Policy
+          {% set never_used = filtered_unused_policies | selectattr('is_never_used', 'equalto', true) | list %}
+          {% for policy in never_used[:3] %}
+          config firewall policy
+              edit {{ policy.policy_id }}
+                  set status disable
+                  set comments "{{ policy.comments }} [PHASE2-DISABLED-{{ ansible_date_time.date }}]"
+              next
+          end
+          # 等待24小時，觀察系統狀況
+          {% endfor %}
+          
+          ## 第三階段：停用長期未使用Policy（建議執行時間：7-14天）
+          {% set long_unused = filtered_unused_policies | rejectattr('is_never_used', 'equalto', true) | list %}
+          {% for policy in long_unused[:5] %}
+          config firewall policy
+              edit {{ policy.policy_id }}
+                  set status disable
+                  set comments "{{ policy.comments }} [PHASE3-DISABLED-{{ ansible_date_time.date }}]"
+              next
+          end
+          # 每停用一個Policy後觀察12小時
+          {% endfor %}
+          
+          ## 第四階段：清理確認（建議執行時間：30天後）
+          # 在停用30天後，如無問題，可考慮刪除
+          # 請再次確認這些Policy確實不需要
+          
+          ## 緊急回復程序
+          # 如發現問題，立即啟用相關Policy：
+          # config firewall policy
+          #     edit <policy_id>
+          #         set status enable
+          #     next
+          # end
+          
+          ## 監控要點
+          1. 檢查防火牆log是否有被拒絕的連線
+          2. 檢查應用系統是否正常運作
+          3. 檢查使用者是否有連線問題投訴
+          4. 監控網路流量是否異常
+        dest: "{{ playbook_dir }}/artifacts/execution_plan_{{ ansible_date_time.epoch }}.txt"
+      when: 
+        - export_to_file | default(false) | bool
+        - filtered_unused_policies | length > 0
+
+    - name: ⚠️ 最終安全提醒
       debug:
         msg: |
-          ========= 匯出檔案完成 =========
-          檔案已儲存到AWX artifacts目錄:
-          - unused_policies_{{ ansible_date_time.epoch }}.csv
-          - unused_policies_{{ ansible_date_time.epoch }}.json
-          - cleanup_commands_{{ ansible_date_time.epoch }}.sh
+          ========= ⚠️ 重要安全提醒 ⚠️ =========
           
-          您可以在AWX Job詳情頁面的"Artifacts"區塊下載這些檔案
-          =============================
-      when: export_to_file | default(false) | bool
+          此查詢已完成，生成的檔案包含：
+          1. 📊 分析報告 (unused_policies_xxx.csv/json)
+          2. 📝 執行計劃 (execution_plan_xxx.txt)  
+          3. 🔧 CLI腳本 (MANUAL_cleanup_commands_xxx.sh)
+          
+          ⚠️ 重要：
+          - 所有CLI命令都需要人工審查和執行
+          - 建議分階段執行，每階段間隔觀察
+          - 執行前請做好備份和回復計劃
+          - 在維護時間窗口執行
+          
+          ❌ 此playbook絕不會自動執行任何變更
+          ✅ 所有變更都需要人工確認和執行
+          =====================================
