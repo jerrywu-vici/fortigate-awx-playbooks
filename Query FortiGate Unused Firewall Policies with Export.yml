@@ -1,106 +1,161 @@
 ---
-- name: Query FortiGate Unused Firewall Policies (Fixed Export)
+- name: Query FortiGate Firewall Policies (Complete Version)
   hosts: localhost
   gather_facts: true
   vars:
     fortigate_api_url: "https://{{ fortigate_host }}:{{ fortigate_api_port | default('443') }}"
-    # 使用多種artifacts路徑嘗試
-    artifacts_dir: "{{ ansible_job_id | default('default') }}"
 
   tasks:
-    # ... 前面的查詢邏輯保持不變 ...
-
-    # =================== 建立artifacts目錄（多種路徑） ===================
-    - name: 建立artifacts目錄（方法1 - 標準路徑）
-      file:
-        path: "/tmp/artifacts"
-        state: directory
-        mode: '0755'
-      ignore_errors: true
-      when: export_to_file | default(false) | bool
-
-    - name: 建立artifacts目錄（方法2 - 工作目錄）
-      file:
-        path: "{{ playbook_dir }}/artifacts"  
-        state: directory
-        mode: '0755'
-      ignore_errors: true
-      when: export_to_file | default(false) | bool
-
-    - name: 建立artifacts目錄（方法3 - job目錄）
-      file:
-        path: "/tmp/{{ ansible_job_id | default('awx') }}"
-        state: directory
-        mode: '0755'
-      ignore_errors: true
-      when: export_to_file | default(false) | bool
-
-    # =================== 檢查可用的目錄 ===================
-    - name: 檢查artifacts目錄
-      stat:
-        path: "{{ item }}"
-      register: dir_check
-      loop:
-        - "/tmp/artifacts"
-        - "{{ playbook_dir }}/artifacts"
-        - "/tmp/{{ ansible_job_id | default('awx') }}"
-      when: export_to_file | default(false) | bool
-
-    - name: 設定可用的artifacts路徑
-      set_fact:
-        final_artifacts_dir: "{{ item.item }}"
-      loop: "{{ dir_check.results | default([]) }}"
-      when: 
-        - export_to_file | default(false) | bool
-        - item.stat.exists | default(false)
-        - final_artifacts_dir is not defined
-
-    - name: 顯示使用的artifacts目錄
+    # =================== 安全檢查 ===================
+    - name: 安全提醒
       debug:
-        msg: "使用artifacts目錄: {{ final_artifacts_dir | default('/tmp/artifacts') }}"
-      when: export_to_file | default(false) | bool
+        msg: "🔍 開始查詢FortiGate Policy (只讀模式)"
 
-    # =================== 匯出檔案到多個位置 ===================
-    - name: 匯出Policy清單CSV（多個位置）
-      copy:
-        content: |
-          # FortiGate Policy Analysis Report
-          # Generated: {{ ansible_date_time.iso8601 }}
-          # VDOM: {{ vdom_name | default('root') }}
-          # Total Policies: {{ total_policies }}
-          # Enabled Policies: {{ enabled_count }}
-          # Listed Policies: {{ filtered_policies | length }}
+    # =================== 資料收集階段 ===================
+    - name: 查詢所有Firewall Policy設定
+      uri:
+        url: "{{ fortigate_api_url }}/api/v2/cmdb/firewall/{{ policy_type | default('policy') }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        body_format: form-urlencoded
+        body:
+          vdom: "{{ vdom_name | default('root') }}"
+        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
+        timeout: "{{ fortigate_timeout | default('60') | int }}"
+      register: policy_config_result
+      retries: "{{ fortigate_api_retries | default('3') | int }}"
+      delay: "{{ fortigate_api_delay | default('5') | int }}"
+
+    - name: 顯示Policy查詢結果
+      debug:
+        msg: "✅ 找到 {{ policy_config_result.json.results | length }} 個Policy"
+
+    # =================== 資料處理 ===================
+    - name: 初始化變數
+      set_fact:
+        all_policies: "{{ policy_config_result.json.results | default([]) }}"
+        total_policies: "{{ policy_config_result.json.results | length }}"
+        enabled_count: 0
+        disabled_count: 0
+        filtered_policies: []
+
+    - name: 計算啟用和停用的Policy數量
+      set_fact:
+        enabled_count: "{{ all_policies | selectattr('status', 'equalto', 'enable') | list | length }}"
+        disabled_count: "{{ all_policies | selectattr('status', 'equalto', 'disable') | list | length }}"
+
+    # =================== 應用過濾條件 ===================
+    - name: 處理Policy並應用過濾條件
+      set_fact:
+        filtered_policies: "{{ filtered_policies + [processed_policy] }}"
+      vars:
+        processed_policy:
+          policy_id: "{{ item.policyid }}"
+          name: "{{ item.name | default('Policy_' + (item.policyid | string)) }}"
+          status: "{{ item.status | default('enable') }}"
+          action: "{{ item.action | default('accept') }}"
+          srcintf: "{{ item.srcintf | default([]) | join(',') }}"
+          dstintf: "{{ item.dstintf | default([]) | join(',') }}"
+          srcaddr: "{{ item.srcaddr | default([]) | join(',') }}"
+          dstaddr: "{{ item.dstaddr | default([]) | join(',') }}"
+          service: "{{ item.service | default([]) | join(',') }}"
+          logtraffic: "{{ item.logtraffic | default('disable') }}"
+          comments: "{{ item.comments | default('') }}"
+          is_enabled: "{{ item.status | default('enable') == 'enable' }}"
+      loop: "{{ all_policies }}"
+      when: 
+        - filter_condition | default(true)
+      vars:
+        filter_condition: |
+          {{
+            (not filter_options.exclude_policy_ids | default([]) or item.policyid | string not in filter_options.exclude_policy_ids) and
+            (not filter_options.min_policy_id | default('') or item.policyid | int >= filter_options.min_policy_id | int) and
+            (not filter_options.max_policy_id | default('') or item.policyid | int <= filter_options.max_policy_id | int) and
+            (include_disabled | default(false) or item.status | default('enable') == 'enable')
+          }}
+
+    # =================== 結果摘要 ===================
+    - name: 顯示分析摘要
+      debug:
+        msg: |
+          ========= FortiGate Policy 分析摘要 =========
+          VDOM: {{ vdom_name | default('root') }}
+          查詢時間: {{ ansible_date_time.iso8601 }}
+          
+          📊 統計結果:
+          - 總Policy數量: {{ total_policies }}
+          - 啟用的Policy: {{ enabled_count }}
+          - 停用的Policy: {{ disabled_count }}
+          - 符合過濾條件: {{ filtered_policies | length }}
+          
+          🔍 過濾條件:
+          {% if filter_options.exclude_policy_ids | default([]) | length > 0 %}
+          - 排除Policy ID: {{ filter_options.exclude_policy_ids | join(', ') }}
+          {% endif %}
+          {% if filter_options.min_policy_id | default('') != '' %}
+          - 最小Policy ID: {{ filter_options.min_policy_id }}
+          {% endif %}
+          {% if filter_options.max_policy_id | default('') != '' %}
+          - 最大Policy ID: {{ filter_options.max_policy_id }}
+          {% endif %}
+          - 包含停用Policy: {{ include_disabled | default(false) }}
+          ==========================================
+
+    # =================== 顯示Policy列表 ===================
+    - name: 顯示Policy清單（前15筆）
+      debug:
+        msg: |
+          ========= Policy 清單 (前15筆) =========
+          {% for policy in filtered_policies[:15] %}
+          {{ "%2d" | format(loop.index) }}. Policy {{ policy.policy_id }}: {{ policy.name[:40] }}
+              狀態: {{ policy.status }} | 動作: {{ policy.action }}
+              介面: {{ policy.srcintf }} -> {{ policy.dstintf }}
+              地址: {{ policy.srcaddr[:50] }}{{ '...' if policy.srcaddr | length > 50 else '' }}
+                 -> {{ policy.dstaddr[:50] }}{{ '...' if policy.dstaddr | length > 50 else '' }}
+              服務: {{ policy.service[:30] }}{{ '...' if policy.service | length > 30 else '' }}
+              {% if policy.comments %}備註: {{ policy.comments[:40] }}{{ '...' if policy.comments | length > 40 else '' }}{% endif %}
+          {% endfor %}
+          {% if filtered_policies | length > 15 %}
+          
+          ⚠️ 還有 {{ filtered_policies | length - 15 }} 筆Policy未顯示
+          {% endif %}
+          ======================================
+      when: filtered_policies | length > 0
+
+    # =================== 直接輸出完整內容（主要方案） ===================
+    - name: 完整CSV內容輸出
+      debug:
+        msg: |
+          ========= 完整CSV內容 (可直接複製使用) =========
+          
+          ## 檔案名稱建議: fortigate_policy_analysis_{{ ansible_date_time.epoch }}.csv
           
           policy_id,name,status,action,srcintf,dstintf,srcaddr,dstaddr,service,logtraffic,comments
           {% for policy in filtered_policies %}
           {{ policy.policy_id }},"{{ policy.name | replace('"', '""') }}",{{ policy.status }},{{ policy.action }},"{{ policy.srcintf }}","{{ policy.dstintf }}","{{ policy.srcaddr }}","{{ policy.dstaddr }}","{{ policy.service }}",{{ policy.logtraffic }},"{{ policy.comments | replace('"', '""') }}"
           {% endfor %}
-        dest: "{{ item }}/policy_analysis_{{ ansible_date_time.epoch }}.csv"
-        mode: '0644'
-      loop:
-        - "/tmp/artifacts"
-        - "{{ playbook_dir }}/artifacts"
-        - "/tmp"
-      ignore_errors: true
-      when: export_to_file | default(false) | bool
-
-    - name: 生成Policy審查報告（多個位置）
-      copy:
-        content: |
-          FortiGate Policy 審查報告
-          ========================
           
-          基本資訊:
-          - 生成時間: {{ ansible_date_time.iso8601 }}
-          - VDOM: {{ vdom_name | default('root') }}
-          - FortiGate: {{ fortigate_host }}
-          - AWX Job ID: {{ ansible_job_id | default('N/A') }}
+          ========= CSV內容結束 =========
+      when: 
+        - filtered_policies | length > 0
+        - export_csv_content | default(true) | bool
+
+    - name: 完整分析報告輸出
+      debug:
+        msg: |
+          ========= 完整分析報告 =========
+          
+          FortiGate Policy 分析報告
+          生成時間: {{ ansible_date_time.iso8601 }}
+          VDOM: {{ vdom_name | default('root') }}
+          FortiGate: {{ fortigate_host }}
           
           統計摘要:
           - 總Policy數量: {{ total_policies }}
           - 啟用Policy數量: {{ enabled_count }}
-          - 停用Policy數量: {{ total_policies | int - enabled_count | int }}
-          - 本次分析Policy數量: {{ filtered_policies | length }}
+          - 停用Policy數量: {{ disabled_count }}
+          - 分析Policy數量: {{ filtered_policies | length }}
           
           Policy 詳細清單:
           {% for policy in filtered_policies %}
@@ -117,116 +172,72 @@
              備註: {{ policy.comments }}
           {% endfor %}
           
-          建議清理CLI命令:
-          ========================
-          # 請人工審查後執行，務必先備份設定
-          
+          建議CLI命令 (請人工審查後執行):
+          ========================================
           # 備份設定
           execute backup config management-station comment "policy-review-{{ ansible_date_time.date }}"
           
-          # 停用Policy範例命令
+          # 停用Policy範例 (請根據需要修改)
           config firewall policy
-          {% for policy in filtered_policies[:5] %}
+          {% for policy in filtered_policies[:10] %}
+          {% if policy.status == 'enable' %}
               # Policy {{ policy.policy_id }}: {{ policy.name }}
               # edit {{ policy.policy_id }}
               #     set status disable
               #     set comments "{{ policy.comments }} [REVIEW-{{ ansible_date_time.date }}]"
               # next
+          {% endif %}
           {% endfor %}
           end
           
           注意事項:
-          ========================
           ⚠️ 所有變更請在維護時間窗口執行
           ⚠️ 建議先停用觀察，確認無影響後再刪除
-          ⚠️ 保持變更記錄以便必要時回復
-        dest: "{{ item }}/policy_review_report_{{ ansible_date_time.epoch }}.txt"
-        mode: '0644'
-      loop:
-        - "/tmp/artifacts"
-        - "{{ playbook_dir }}/artifacts"
-        - "/tmp"
-      ignore_errors: true
-      when: export_to_file | default(false) | bool
+          
+          ========= 報告結束 =========
+      when: 
+        - filtered_policies | length > 0
+        - export_full_report | default(true) | bool
 
-    # =================== 直接在Job輸出中顯示檔案內容（備選方案） ===================
-    - name: 顯示CSV內容（供複製使用）
-      debug:
-        msg: |
-          ========= CSV檔案內容 (可直接複製) =========
+    # =================== 檔案匯出嘗試（可選） ===================
+    - name: 嘗試建立artifacts目錄
+      file:
+        path: "/tmp/artifacts"
+        state: directory
+        mode: '0755'
+      ignore_errors: true
+      when: try_file_export | default(false) | bool
+
+    - name: 嘗試匯出CSV檔案
+      copy:
+        content: |
           policy_id,name,status,action,srcintf,dstintf,srcaddr,dstaddr,service,logtraffic,comments
           {% for policy in filtered_policies %}
           {{ policy.policy_id }},"{{ policy.name | replace('"', '""') }}",{{ policy.status }},{{ policy.action }},"{{ policy.srcintf }}","{{ policy.dstintf }}","{{ policy.srcaddr }}","{{ policy.dstaddr }}","{{ policy.service }}",{{ policy.logtraffic }},"{{ policy.comments | replace('"', '""') }}"
           {% endfor %}
-          ========= CSV檔案內容結束 =========
-          
-          您可以複製上述內容並儲存為 .csv 檔案
-      when: 
-        - export_to_file | default(false) | bool
-        - show_content_in_log | default(false) | bool
-
-    # =================== 檢查檔案是否成功建立 ===================
-    - name: 檢查匯出檔案狀態
-      stat:
-        path: "{{ item }}/policy_analysis_{{ ansible_date_time.epoch }}.csv"
-      register: file_check
-      loop:
-        - "/tmp/artifacts"
-        - "{{ playbook_dir }}/artifacts"
-        - "/tmp"
-      when: export_to_file | default(false) | bool
-
-    - name: 顯示檔案建立狀態
-      debug:
-        msg: |
-          檔案建立狀態檢查:
-          {% for result in file_check.results %}
-          - {{ result.item }}/policy_analysis_{{ ansible_date_time.epoch }}.csv: {{ '✅ 存在' if result.stat.exists else '❌ 不存在' }}
-          {% if result.stat.exists %}
-            檔案大小: {{ result.stat.size }} bytes
-          {% endif %}
-          {% endfor %}
-      when: export_to_file | default(false) | bool
-
-    # =================== 提供下載指引 ===================
-    - name: 下載指引
-      debug:
-        msg: |
-          📁 檔案匯出完成！請嘗試以下方式取得檔案：
-          
-          方法1 - AWX Artifacts:
-          - 到AWX Job詳情頁面查看 "Artifacts" 區塊
-          - 如果沒有Artifacts區塊，請檢查AWX設定
-          
-          方法2 - 直接從容器複製:
-          docker exec -it <awx_task_container> ls -la /tmp/artifacts/
-          docker cp <awx_task_container>:/tmp/artifacts/policy_analysis_{{ ansible_date_time.epoch }}.csv .
-          
-          方法3 - 查看Job輸出:
-          {% if show_content_in_log | default(false) %}
-          - 上方已顯示CSV內容，可直接複製使用
-          {% else %}
-          - 重新執行Job並設定 show_content_in_log: true 來顯示檔案內容
-          {% endif %}
-          
-          檔案名稱:
-          - policy_analysis_{{ ansible_date_time.epoch }}.csv
-          - policy_review_report_{{ ansible_date_time.epoch }}.txt
-      when: export_to_file | default(false) | bool
+        dest: "/tmp/artifacts/policy_analysis_{{ ansible_date_time.epoch }}.csv"
+        mode: '0644'
+      ignore_errors: true
+      when: try_file_export | default(false) | bool
 
     # =================== 最終報告 ===================
-    - name: 查詢完成報告
+    - name: 完成報告
       debug:
         msg: |
           🎯 Policy分析完成！
           
           📈 處理結果:
-          - 分析了 {{ total_policies }} 個Policy
-          - 符合條件的Policy: {{ filtered_policies | length }} 個
+          - 總共分析: {{ total_policies }} 個Policy
+          - 符合條件: {{ filtered_policies | length }} 個Policy
+          - 啟用狀態: {{ enabled_count }} 個
+          - 停用狀態: {{ disabled_count }} 個
           
-          {% if export_to_file | default(false) | bool %}
-          📁 匯出狀態: 檔案已嘗試匯出到多個位置
-          時間戳記: {{ ansible_date_time.epoch }}
-          {% endif %}
+          📋 使用建議:
+          1. 複製上方的CSV內容到Excel或文字檔案
+          2. 根據分析報告識別需要處理的Policy
+          3. 在維護時間窗口執行建議的CLI命令
           
-          ⚠️ 如無法下載檔案，請設定 show_content_in_log: true 重新執行
+          ⚠️ 重要提醒:
+          - 所有Policy變更都應該先測試
+          - 務必先備份設定
+          - 建議分階段執行變更
