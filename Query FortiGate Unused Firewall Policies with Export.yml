@@ -166,3 +166,21 @@
           ❌ 此playbook絕不會自動執行任何變更
           ✅ 所有變更都需要人工確認和執行
           =====================================
+    # 防止意外執行的額外檢查
+    - name: 確認不會自動執行變更
+      fail:
+        msg: |
+          ❌ 安全檢查失敗！
+          檢測到可能的自動執行設定。
+          此playbook設計為只讀模式，不應包含任何自動執行功能。
+      when: 
+        - auto_execute is defined
+        - auto_execute | bool
+
+    - name: 驗證只讀模式
+      assert:
+        that:
+          - read_only_mode | default(true) | bool
+          - not (auto_cleanup | default(false) | bool)
+        fail_msg: "此playbook必須在只讀模式下運行"
+        success_msg: "✅ 安全檢查通過，只讀模式已確認"
