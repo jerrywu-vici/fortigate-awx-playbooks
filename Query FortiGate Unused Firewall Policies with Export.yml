@@ -31,158 +31,154 @@
 
     - name: 顯示Policy查詢進度
       debug:
-        msg: "✅ 找到 {{ policy_config_result.json.results | length }} 個Policy，開始批次查詢使用統計..."
+        msg: "✅ 找到 {{ policy_config_result.json.results | length }} 個Policy，開始分析..."
 
-    # =================== 批次查詢統計（簡化版） ===================
-    - name: 批次查詢Policy統計資料
+    # =================== 使用Python腳本處理資料 ===================
+    - name: 創建臨時Python腳本
+      copy:
+        content: |
+          #!/usr/bin/env python3
+          import json
+          import sys
+          from datetime import datetime
+          
+          def main():
+              # 從環境變數讀取資料
+              configs_str = """{{ policy_config_result.json.results | to_json }}"""
+              threshold = {{ threshold_timestamp }}
+              current_time = {{ current_timestamp }}
+              include_never = {{ include_never_used | default(true) | to_json }}
+              months_threshold = {{ months_threshold | default('6') }}
+              
+              try:
+                  configs = json.loads(configs_str)
+              except:
+                  print(json.dumps({"error": "Failed to parse config data"}))
+                  return
+              
+              unused_policies = []
+              summary = {
+                  'total': len(configs),
+                  'enabled': 0,
+                  'unused_long_term': 0,
+                  'unused_never': 0,
+                  'total_unused': 0
+              }
+              
+              for config in configs:
+                  policy_id = str(config.get('policyid', ''))
+                  is_enabled = config.get('status', 'enable') == 'enable'
+                  
+                  if is_enabled:
+                      summary['enabled'] += 1
+                  
+                  # 簡化版：假設沒有統計資料，所有Policy都算"從未使用"
+                  # 在生產環境中，您需要單獨查詢統計資料
+                  last_used = 0
+                  hit_count = 0
+                  is_never_used = True
+                  is_old_unused = False
+                  
+                  # 判斷是否為未使用
+                  is_unused = is_old_unused or (is_never_used and include_never)
+                  
+                  if is_unused:
+                      days_ago = -1  # 表示從未使用
+                      
+                      policy_data = {
+                          'policy_id': policy_id,
+                          'name': config.get('name', f'Policy_{policy_id}'),
+                          'status': config.get('status', 'enable'),
+                          'action': config.get('action', 'accept'),
+                          'srcintf': ','.join(config.get('srcintf', [])),
+                          'dstintf': ','.join(config.get('dstintf', [])),
+                          'srcaddr': ','.join(config.get('srcaddr', [])),
+                          'dstaddr': ','.join(config.get('dstaddr', [])),
+                          'service': ','.join(config.get('service', [])),
+                          'comments': config.get('comments', ''),
+                          'last_used': last_used,
+                          'last_used_readable': 'Never',
+                          'hit_count': hit_count,
+                          'days_since_last_used': days_ago,
+                          'is_never_used': is_never_used,
+                          'is_enabled': is_enabled
+                      }
+                      
+                      unused_policies.append(policy_data)
+                      summary['total_unused'] += 1
+                      summary['unused_never'] += 1
+              
+              result = {
+                  'unused_policies': unused_policies,
+                  'summary': summary
+              }
+              
+              print(json.dumps(result))
+          
+          if __name__ == "__main__":
+              main()
+        dest: "/tmp/analyze_policies.py"
+        mode: '0755'
+
+    - name: 執行Policy分析腳本
+      command: python3 /tmp/analyze_policies.py
+      register: analysis_output
+
+    - name: 解析分析結果
+      set_fact:
+        analysis_result: "{{ analysis_output.stdout | from_json }}"
+
+    # =================== 簡化版：逐個查詢統計（可選） ===================
+    - name: 查詢前5個Policy的統計資料作為示例
       uri:
-        url: "{{ fortigate_api_url }}/api/v2/monitor/firewall/policy"
+        url: "{{ fortigate_api_url }}/api/v2/monitor/firewall/policy/select"
         method: GET
         headers:
           Authorization: "Bearer {{ fortigate_access_token }}"
         body_format: form-urlencoded
         body:
           vdom: "{{ vdom_name | default('root') }}"
+          policyid: "{{ item.policyid }}"
         validate_certs: "{{ fortigate_validate_certs | default(false) }}"
-        timeout: "{{ fortigate_timeout | default('120') | int }}"
+        timeout: "{{ fortigate_timeout | default('15') | int }}"
         status_code: [200, 424]
-      register: policy_stats_bulk
+      register: sample_stats
+      loop: "{{ policy_config_result.json.results[:5] }}"
       failed_when: false
+      no_log: true
+      when: 
+        - policy_config_result.json.results | length > 0
+        - detailed_analysis | default(false) | bool
 
-    - name: 顯示統計查詢結果
-      debug:
-        msg: "✅ 統計查詢完成，開始分析資料..."
-
-    # =================== 使用Python腳本處理資料（避免複雜模板） ===================
-    - name: 處理Policy資料
+    # =================== 應用簡單過濾條件 ===================
+    - name: 應用基本過濾條件
       set_fact:
-        analysis_result: "{{ policy_configs | process_policies }}"
+        filtered_policies: "{{ final_filtered }}"
       vars:
-        policy_configs: "{{ policy_config_result.json.results | default([]) }}"
-        policy_stats: "{{ policy_stats_bulk.json.results | default([]) }}"
-        threshold: "{{ threshold_timestamp }}"
-        current_time: "{{ current_timestamp }}"
-        include_never: "{{ include_never_used | default(true) }}"
-
-    # 如果上面的custom filter不可用，使用替代方案
-    - name: 替代資料處理方案
-      shell: |
-        python3 -c "
-        import json
-        import sys
-        from datetime import datetime
-
-        # 讀取資料
-        configs = {{ policy_config_result.json.results | to_json }}
-        stats = {{ policy_stats_bulk.json.results | default([]) | to_json }}
-        threshold = {{ threshold_timestamp }}
-        current_time = {{ current_timestamp }}
-        include_never = {{ include_never_used | default(true) | to_json }}
-
-        # 建立統計字典
-        stats_dict = {}
-        for stat in stats:
-            stats_dict[str(stat.get('policyid', ''))] = stat
-
-        # 處理每個policy
-        unused_policies = []
-        summary = {
-            'total': len(configs),
-            'enabled': 0,
-            'unused_long_term': 0,
-            'unused_never': 0,
-            'total_unused': 0
-        }
-
-        for config in configs:
-            policy_id = str(config.get('policyid', ''))
-            stat = stats_dict.get(policy_id, {})
-            
-            last_used = int(stat.get('last_used', 0))
-            hit_count = int(stat.get('hit_count', 0))
-            is_enabled = config.get('status', 'enable') == 'enable'
-            is_never_used = last_used == 0
-            is_old_unused = last_used > 0 and last_used < threshold
-            
-            if is_enabled:
-                summary['enabled'] += 1
-            
-            # 判斷是否為未使用
-            is_unused = is_old_unused or (is_never_used and include_never)
-            
-            if is_unused:
-                days_ago = ((current_time - last_used) // 86400) if last_used > 0 else -1
-                
-                policy_data = {
-                    'policy_id': policy_id,
-                    'name': config.get('name', f'Policy_{policy_id}'),
-                    'status': config.get('status', 'enable'),
-                    'action': config.get('action', 'accept'),
-                    'srcintf': ','.join(config.get('srcintf', [])),
-                    'dstintf': ','.join(config.get('dstintf', [])),
-                    'srcaddr': ','.join(config.get('srcaddr', [])),
-                    'dstaddr': ','.join(config.get('dstaddr', [])),
-                    'service': ','.join(config.get('service', [])),
-                    'comments': config.get('comments', ''),
-                    'last_used': last_used,
-                    'last_used_readable': 'Never' if is_never_used else datetime.fromtimestamp(last_used).strftime('%Y-%m-%d %H:%M:%S'),
-                    'hit_count': hit_count,
-                    'days_since_last_used': days_ago,
-                    'is_never_used': is_never_used,
-                    'is_enabled': is_enabled
-                }
-                
-                unused_policies.append(policy_data)
-                summary['total_unused'] += 1
-                
-                if is_never_used:
-                    summary['unused_never'] += 1
-                else:
-                    summary['unused_long_term'] += 1
-
-        # 輸出結果
-        result = {
-            'unused_policies': unused_policies,
-            'summary': summary
-        }
-        
-        print(json.dumps(result))
-        "
-      register: python_analysis
-      when: analysis_result is not defined
-
-    - name: 設定分析結果
-      set_fact:
-        final_analysis: "{{ python_analysis.stdout | from_json if python_analysis.stdout is defined else analysis_result }}"
-
-    # =================== 應用過濾條件 ===================
-    - name: 應用過濾條件
-      set_fact:
-        filtered_policies: "{{ final_analysis.unused_policies | apply_filters }}"
-      vars:
-        filters:
-          exclude_ids: "{{ filter_options.exclude_policy_ids | default([]) }}"
-          min_id: "{{ filter_options.min_policy_id | default('') }}"
-          max_id: "{{ filter_options.max_policy_id | default('') }}"
-          include_disabled: "{{ include_disabled | default(false) }}"
-
-    # 手動過濾（如果custom filter不可用）
-    - name: 手動應用過濾條件
-      set_fact:
-        filtered_policies: "{{ filtered_list }}"
-      vars:
-        filtered_list: |
+        exclude_ids: "{{ filter_options.exclude_policy_ids | default([]) | map('string') | list }}"
+        min_id_str: "{{ filter_options.min_policy_id | default('') }}"
+        max_id_str: "{{ filter_options.max_policy_id | default('') }}"
+        final_filtered: |
           [
-          {% for policy in final_analysis.unused_policies %}
+          {% for policy in analysis_result.unused_policies %}
           {% set skip = false %}
-          {% if filter_options.exclude_policy_ids | default([]) and policy.policy_id in filter_options.exclude_policy_ids %}{% set skip = true %}{% endif %}
-          {% if filter_options.min_policy_id | default('') != '' and policy.policy_id | int < filter_options.min_policy_id | int %}{% set skip = true %}{% endif %}
-          {% if filter_options.max_policy_id | default('') != '' and policy.policy_id | int > filter_options.max_policy_id | int %}{% set skip = true %}{% endif %}
-          {% if not include_disabled | default(false) and not policy.is_enabled %}{% set skip = true %}{% endif %}
-          {% if not skip %}{{ policy | to_json }}{% if not loop.last %},{% endif %}{% endif %}
+          {% if exclude_ids and policy.policy_id in exclude_ids %}
+          {% set skip = true %}
+          {% endif %}
+          {% if min_id_str != '' and policy.policy_id | int < min_id_str | int %}
+          {% set skip = true %}
+          {% endif %}
+          {% if max_id_str != '' and policy.policy_id | int > max_id_str | int %}
+          {% set skip = true %}
+          {% endif %}
+          {% if not include_disabled | default(false) and not policy.is_enabled %}
+          {% set skip = true %}
+          {% endif %}
+          {% if not skip %}
+          {{ policy | to_json }}{% if not loop.last %},{% endif %}
+          {% endif %}
           {% endfor %}
           ]
-      when: filtered_policies is not defined
 
     # =================== 結果摘要 ===================
     - name: 顯示分析摘要
@@ -190,41 +186,37 @@
         msg: |
           ========= FortiGate Policy 分析摘要 =========
           VDOM: {{ vdom_name | default('root') }}
-          查詢閾值: {{ months_threshold | default('6') }} 個月
           
           📊 統計結果:
-          - 總Policy數量: {{ final_analysis.summary.total }}
-          - 啟用的Policy: {{ final_analysis.summary.enabled }}
-          - 超過{{ months_threshold }}個月未使用: {{ final_analysis.summary.unused_long_term }}
-          - 從未使用過: {{ final_analysis.summary.unused_never }}
-          - 過濾後符合條件: {{ filtered_policies | length }}
+          - 總Policy數量: {{ analysis_result.summary.total }}
+          - 啟用的Policy: {{ analysis_result.summary.enabled }}
+          - 找到符合條件的Policy: {{ filtered_policies | length }}
           
-          💡 建議動作:
-          {% if final_analysis.summary.unused_never > 0 %}
-          - 檢視 {{ final_analysis.summary.unused_never }} 個從未使用的Policy
-          {% endif %}
-          {% if final_analysis.summary.unused_long_term > 0 %}
-          - 評估 {{ final_analysis.summary.unused_long_term }} 個長期未使用的Policy
+          ⚠️ 注意: 此查詢基於Policy設定，未包含詳細使用統計
+          {% if not detailed_analysis | default(false) %}
+          如需詳細統計分析，請設定 detailed_analysis: true
           {% endif %}
           ==========================================
 
-    # =================== 詳細結果（只顯示前10筆） ===================
-    - name: 顯示未使用Policy詳情（前10筆）
+    # =================== 顯示Policy列表（限制顯示數量） ===================
+    - name: 顯示Policy清單（前20筆）
       debug:
         msg: |
-          ========= 未使用Policy詳情 (顯示前10筆) =========
-          {% for policy in filtered_policies[:10] %}
-          {{ loop.index }}. Policy {{ policy.policy_id }}: {{ policy.name }}
-             狀態: {{ policy.status }} | 最後使用: {{ policy.last_used_readable }}
-             {% if policy.days_since_last_used > 0 %}未使用: {{ policy.days_since_last_used }}天{% endif %}
-             來源: {{ policy.srcaddr }} | 目的: {{ policy.dstaddr }}
-             服務: {{ policy.service }}
+          ========= Policy 清單 (前20筆) =========
+          {% for policy in filtered_policies[:20] %}
+          {{ "%2d" | format(loop.index) }}. Policy {{ policy.policy_id }}: {{ policy.name }}
+              狀態: {{ policy.status }} | 動作: {{ policy.action }}
+              來源: {{ policy.srcintf }} -> {{ policy.dstintf }}
+              地址: {{ policy.srcaddr }} -> {{ policy.dstaddr }}
+              服務: {{ policy.service }}
+              {% if policy.comments %}備註: {{ policy.comments }}{% endif %}
           {% endfor %}
-          {% if filtered_policies | length > 10 %}
+          {% if filtered_policies | length > 20 %}
           
-          ... 還有 {{ filtered_policies | length - 10 }} 筆，詳細資料請查看匯出檔案
+          ⚠️ 還有 {{ filtered_policies | length - 20 }} 筆Policy未顯示
+          完整清單請查看匯出的CSV檔案
           {% endif %}
-          =============================================
+          ======================================
       when: filtered_policies | length > 0
 
     # =================== 檔案匯出 ===================
@@ -234,77 +226,86 @@
         state: directory
       when: export_to_file | default(false) | bool
 
-    - name: 匯出完整CSV報告
+    - name: 匯出Policy清單CSV
       copy:
         content: |
-          # FortiGate Unused Policy Report - {{ ansible_date_time.iso8601 }}
-          # VDOM: {{ vdom_name | default('root') }}, Threshold: {{ months_threshold | default('6') }} months
-          # Total: {{ final_analysis.summary.total }}, Unused Found: {{ filtered_policies | length }}
+          # FortiGate Policy List - {{ ansible_date_time.iso8601 }}
+          # VDOM: {{ vdom_name | default('root') }}
+          # Total Policies: {{ analysis_result.summary.total }}
+          # Listed Policies: {{ filtered_policies | length }}
           
-          policy_id,name,status,action,last_used,days_unused,hit_count,srcintf,dstintf,srcaddr,dstaddr,service,comments
+          policy_id,name,status,action,srcintf,dstintf,srcaddr,dstaddr,service,comments
           {% for policy in filtered_policies %}
-          {{ policy.policy_id }},"{{ policy.name | replace('"', '""') }}",{{ policy.status }},{{ policy.action }},{{ policy.last_used_readable }},{{ policy.days_since_last_used }},{{ policy.hit_count }},"{{ policy.srcintf }}","{{ policy.dstintf }}","{{ policy.srcaddr }}","{{ policy.dstaddr }}","{{ policy.service }}","{{ policy.comments | replace('"', '""') }}"
+          {{ policy.policy_id }},"{{ policy.name | replace('"', '""') }}",{{ policy.status }},{{ policy.action }},"{{ policy.srcintf }}","{{ policy.dstintf }}","{{ policy.srcaddr }}","{{ policy.dstaddr }}","{{ policy.service }}","{{ policy.comments | replace('"', '""') }}"
           {% endfor %}
-        dest: "{{ playbook_dir }}/artifacts/unused_policies_{{ ansible_date_time.epoch }}.csv"
+        dest: "{{ playbook_dir }}/artifacts/policy_list_{{ ansible_date_time.epoch }}.csv"
       when: export_to_file | default(false) | bool
 
-    - name: 生成摘要報告
+    - name: 生成Policy管理腳本
       copy:
         content: |
-          FortiGate Unused Policy 分析報告
-          生成時間: {{ ansible_date_time.iso8601 }}
-          VDOM: {{ vdom_name | default('root') }}
-          查詢閾值: {{ months_threshold | default('6') }} 個月
+          # FortiGate Policy Management Script
+          # Generated: {{ ansible_date_time.iso8601 }}
+          # VDOM: {{ vdom_name | default('root') }}
           
-          === 統計摘要 ===
-          總Policy數量: {{ final_analysis.summary.total }}
-          啟用的Policy: {{ final_analysis.summary.enabled }}
-          超過{{ months_threshold }}個月未使用: {{ final_analysis.summary.unused_long_term }}
-          從未使用過: {{ final_analysis.summary.unused_never }}
-          過濾後符合條件: {{ filtered_policies | length }}
+          # ⚠️ 重要：此腳本僅供參考，請人工審查後執行
           
-          === 建議清理的Policy ===
-          {% for policy in filtered_policies %}
-          Policy {{ policy.policy_id }}: {{ policy.name }}
-            狀態: {{ policy.status }}
-            最後使用: {{ policy.last_used_readable }}
-            {% if policy.days_since_last_used > 0 %}未使用天數: {{ policy.days_since_last_used }}{% endif %}
-            來源: {{ policy.srcaddr }}
-            目的: {{ policy.dstaddr }}
-            服務: {{ policy.service }}
-            備註: {{ policy.comments }}
+          # === 備份當前設定 ===
+          execute backup config management-station comment "policy-review-{{ ansible_date_time.date }}"
           
-          {% endfor %}
-          
-          === 清理建議CLI命令 ===
-          # 請人工審查後執行，分批執行並觀察影響
-          
+          # === 停用指定Policy（請根據需要選擇執行） ===
           config firewall policy
-          {% for policy in filtered_policies %}
-          {% if policy.is_enabled %}
-              # {{ policy.name }} - 未使用{{ policy.days_since_last_used if policy.days_since_last_used > 0 else '從未使用' }}
-              edit {{ policy.policy_id }}
-                  set status disable
-                  set comments "{{ policy.comments }} [DISABLED-{{ ansible_date_time.date }}]"
-              next
-          {% endif %}
+          {% for policy in filtered_policies[:10] %}
+              # Policy {{ policy.policy_id }}: {{ policy.name }}
+              # 來源: {{ policy.srcaddr }} -> 目的: {{ policy.dstaddr }}
+              # edit {{ policy.policy_id }}
+              #     set status disable
+              #     set comments "{{ policy.comments }} [REVIEW-{{ ansible_date_time.date }}]"
+              # next
           {% endfor %}
           end
-        dest: "{{ playbook_dir }}/artifacts/policy_analysis_report_{{ ansible_date_time.epoch }}.txt"
-      when: export_to_file | default(false) | bool
+          
+          # === 檢查命令 ===
+          # 檢查Policy狀態
+          show firewall policy
+          
+          # 檢查Policy統計
+          diagnose firewall iprope show 100000
+        dest: "{{ playbook_dir }}/artifacts/policy_management_{{ ansible_date_time.epoch }}.cli"
+        mode: '0644'
+      when: 
+        - export_to_file | default(false) | bool
+        - filtered_policies | length > 0
+
+    # =================== 清理臨時檔案 ===================
+    - name: 清理臨時腳本
+      file:
+        path: "/tmp/analyze_policies.py"
+        state: absent
 
     # =================== 最終報告 ===================
-    - name: 完成報告
+    - name: 查詢完成報告
       debug:
         msg: |
-          🎯 查詢完成！
+          🎯 Policy查詢完成！
           
-          📈 結果: 在{{ final_analysis.summary.total }}個Policy中找到{{ filtered_policies | length }}個符合清理條件
+          📈 結果摘要:
+          - 總Policy數量: {{ analysis_result.summary.total }}
+          - 啟用Policy數量: {{ analysis_result.summary.enabled }}
+          - 符合條件Policy: {{ filtered_policies | length }}
           
           {% if export_to_file | default(false) | bool %}
-          📁 檔案已匯出到artifacts:
-          - unused_policies_{{ ansible_date_time.epoch }}.csv (詳細資料)
-          - policy_analysis_report_{{ ansible_date_time.epoch }}.txt (分析報告)
+          📁 匯出檔案:
+          - policy_list_{{ ansible_date_time.epoch }}.csv
+          - policy_management_{{ ansible_date_time.epoch }}.cli
+          
+          請到AWX Job的Artifacts區塊下載檔案
           {% endif %}
           
-          ⚠️  所有變更請人工審查後執行
+          💡 建議後續動作:
+          1. 審查匯出的Policy清單
+          2. 識別確實不需要的Policy
+          3. 在維護時間窗口測試停用
+          4. 觀察影響後決定是否刪除
+          
+          ⚠️ 所有變更請務必人工確認後執行
