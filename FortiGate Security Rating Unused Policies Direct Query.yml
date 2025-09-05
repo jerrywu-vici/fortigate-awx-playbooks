@@ -1,5 +1,5 @@
 ---
-- name: FortiGate Unused Policies Extractor (Complete Solution)
+- name: FortiGate Unused Policies Extractor (Fixed)
   hosts: localhost
   gather_facts: false
   vars:
@@ -19,142 +19,166 @@
         timeout: 30
       register: all_policies
 
-    - name: 📊 總體統計
+    - name: 🔍 篩選 Unused Policies
+      set_fact:
+        unused_policies: "{{ all_policies.json.results | selectattr('bytes', 'equalto', 0) | selectattr('packets', 'equalto', 0) | list }}"
+
+    - name: 📊 Policy 統計總覽
       debug:
         msg: |
           ========= 📊 Policy 統計總覽 =========
           🏢 VDOM: {{ vdom_name | default('root') }}
           📋 總 Policies: {{ all_policies.json.results | length }}
-          🎯 正在分析 unused policies...
-          ====================================
-
-    - name: 🔍 篩選和分析 Unused Policies
-      set_fact:
-        unused_policies: "{{ all_policies.json.results | selectattr('bytes', 'equalto', 0) | selectattr('packets', 'equalto', 0) | list }}"
-        used_policies: "{{ all_policies.json.results | rejectattr('bytes', 'equalto', 0) | list + all_policies.json.results | rejectattr('packets', 'equalto', 0) | list | unique }}"
-
-    - name: 📋 顯示 Unused Policies 清單
-      debug:
-        msg: |
-          ========= 🎯 Unused Policies 清單 =========
-          
-          📊 Unused Policies: {{ unused_policies | length }} / {{ all_policies.json.results | length }}
+          🎯 Unused Policies: {{ unused_policies | length }}
           📊 Used Policies: {{ (all_policies.json.results | length) - (unused_policies | length) }}
           
+          📈 Unused 比例: {{ ((unused_policies | length / all_policies.json.results | length) * 100) | round(1) }}%
+          ====================================
+
+    - name: 🎯 顯示 Unused Policies 清單
+      debug:
+        msg: |
+          ========= 🎯 Unused Policies 詳細清單 =========
+          
           {% if unused_policies | length > 0 %}
-          🔍 詳細清單:
-          
-          | Policy ID | Last Used | First Used | Hit Count | Session Count |
-          |-----------|-----------|------------|-----------|---------------|
           {% for policy in unused_policies | sort(attribute='policyid') %}
-          | {{ policy.policyid | string | ljust(9) }} | {{ 'Never' if policy.last_used == 0 else (policy.last_used | int | strftime('%Y-%m-%d %H:%M:%S')) | ljust(9) }} | {{ 'Never' if policy.first_used == 0 else (policy.first_used | int | strftime('%Y-%m-%d %H:%M:%S')) | ljust(10) }} | {{ policy.hit_count | string | ljust(9) }} | {{ policy.session_count | string | ljust(13) }} |
+          
+          📋 Policy {{ policy.policyid }}:
+          - Bytes: {{ policy.bytes }}
+          - Packets: {{ policy.packets }}  
+          - Hit Count: {{ policy.hit_count }}
+          - Session Count: {{ policy.session_count }}
+          - Last Used: {{ 'Never' if policy.last_used == 0 else (policy.last_used | int | strftime('%Y-%m-%d %H:%M:%S')) }}
+          - First Used: {{ 'Never' if policy.first_used == 0 else (policy.first_used | int | strftime('%Y-%m-%d %H:%M:%S')) }}
+          
           {% endfor %}
-          
-          🎯 Summary:
-          {% set never_used = unused_policies | selectattr('last_used', 'equalto', 0) | list %}
-          {% set old_unused = unused_policies | rejectattr('last_used', 'equalto', 0) | list %}
-          
-          - Never Used: {{ never_used | length }} policies
-          - Previously Used: {{ old_unused | length }} policies
-          
-          {% if never_used | length > 0 %}
-          📋 Never Used Policy IDs: {{ never_used | map(attribute='policyid') | list | sort | join(', ') }}
-          {% endif %}
-          
           {% else %}
           ✅ 所有 policies 都有使用記錄！
           {% endif %}
-          ==========================================
+          ===============================================
 
-    - name: 📁 獲取 Policy 名稱 (如果需要)
-      uri:
-        url: "{{ fortigate_api_url }}/api/v2/cmdb/firewall/policy/{{ item.policyid }}"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ fortigate_access_token }}"
-        body_format: form-urlencoded
-        body:
-          vdom: "{{ vdom_name | default('root') }}"
-        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
-        timeout: 10
-        status_code: [200, 400, 404]
-      register: policy_details
-      loop: "{{ unused_policies[:5] }}"  # 只取前5個以免太慢
-      failed_when: false
-      when: unused_policies | length > 0
-
-    - name: 📋 顯示詳細 Policy 資訊
+    - name: 📋 Unused Policies 摘要
       debug:
         msg: |
-          ========= 📋 Unused Policies 詳細資訊 =========
+          ========= 📋 Unused Policies 摘要 =========
           
-          {% if policy_details is defined and policy_details.results %}
-          {% for result in policy_details.results %}
-          {% if result.status == 200 %}
+          {% if unused_policies | length > 0 %}
+          {% set never_used = unused_policies | selectattr('last_used', 'equalto', 0) | list %}
+          {% set old_unused = unused_policies | rejectattr('last_used', 'equalto', 0) | list %}
           
-          🔍 Policy {{ result.item.policyid }}:
-          - Name: {{ result.json.results[0].name if result.json.results and result.json.results[0].name is defined else 'N/A' }}
-          - Source: {{ result.json.results[0].srcaddr if result.json.results and result.json.results[0].srcaddr is defined else 'N/A' }}
-          - Destination: {{ result.json.results[0].dstaddr if result.json.results and result.json.results[0].dstaddr is defined else 'N/A' }}
-          - Service: {{ result.json.results[0].service if result.json.results and result.json.results[0].service is defined else 'N/A' }}
-          - Action: {{ result.json.results[0].action if result.json.results and result.json.results[0].action is defined else 'N/A' }}
-          - Last Used: {{ 'Never' if result.item.last_used == 0 else (result.item.last_used | int | strftime('%Y-%m-%d %H:%M:%S')) }}
+          📊 分類統計:
+          - Never Used: {{ never_used | length }} policies
+          - Previously Used (但現在未使用): {{ old_unused | length }} policies
           
+          📋 Never Used Policy IDs: 
+          {{ never_used | map(attribute='policyid') | list | sort | join(', ') }}
+          
+          📋 All Unused Policy IDs:
+          {{ unused_policies | map(attribute='policyid') | list | sort | join(', ') }}
+          
+          {% else %}
+          ✅ 沒有發現 unused policies
           {% endif %}
-          {% endfor %}
-          {% endif %}
-          
-          💡 完整的 unused policies 資料已收集完成！
-          =============================================
+          =========================================
 
-    # 生成 JSON 格式輸出
-    - name: 📤 生成結構化輸出
+    # 生成 CSV 格式輸出 (更實用)
+    - name: 📄 生成 CSV 格式輸出
+      debug:
+        msg: |
+          ========= 📄 CSV 格式輸出 =========
+          
+          Policy ID,Bytes,Packets,Hit Count,Session Count,Last Used,First Used,Status
+          {% for policy in unused_policies | sort(attribute='policyid') %}
+          {{ policy.policyid }},{{ policy.bytes }},{{ policy.packets }},{{ policy.hit_count }},{{ policy.session_count }},"{{ 'Never' if policy.last_used == 0 else (policy.last_used | int | strftime('%Y-%m-%d %H:%M:%S')) }}","{{ 'Never' if policy.first_used == 0 else (policy.first_used | int | strftime('%Y-%m-%d %H:%M:%S')) }}","{{ 'Never Used' if policy.last_used == 0 else 'Previously Used' }}"
+          {% endfor %}
+          
+          ===================================
+
+    # 生成簡潔的 JSON 輸出
+    - name: 📤 生成 JSON 格式輸出
       debug:
         msg: |
           ========= 📤 JSON 格式輸出 =========
           
           {
+            "scan_info": {
+              "vdom": "{{ vdom_name | default('root') }}",
+              "scan_time": "{{ ansible_date_time.iso8601 }}",
+              "fortigate_host": "{{ fortigate_host }}"
+            },
             "summary": {
               "total_policies": {{ all_policies.json.results | length }},
               "unused_policies": {{ unused_policies | length }},
               "used_policies": {{ (all_policies.json.results | length) - (unused_policies | length) }},
-              "vdom": "{{ vdom_name | default('root') }}",
-              "scan_time": "{{ ansible_date_time.iso8601 }}"
+              "unused_percentage": {{ ((unused_policies | length / all_policies.json.results | length) * 100) | round(1) }}
             },
-            "unused_policies": [
+            "unused_policy_ids": {{ unused_policies | map(attribute='policyid') | list | sort }},
+            "unused_policies_detail": [
               {% for policy in unused_policies | sort(attribute='policyid') %}
               {
                 "policyid": {{ policy.policyid }},
                 "bytes": {{ policy.bytes }},
                 "packets": {{ policy.packets }},
-                "last_used": {{ policy.last_used }},
-                "last_used_readable": "{{ 'Never' if policy.last_used == 0 else (policy.last_used | int | strftime('%Y-%m-%d %H:%M:%S')) }}",
-                "first_used": {{ policy.first_used }},
                 "hit_count": {{ policy.hit_count }},
-                "session_count": {{ policy.session_count }}
+                "session_count": {{ policy.session_count }},
+                "last_used_timestamp": {{ policy.last_used }},
+                "last_used_readable": "{{ 'Never' if policy.last_used == 0 else (policy.last_used | int | strftime('%Y-%m-%d %H:%M:%S')) }}",
+                "first_used_timestamp": {{ policy.first_used }},
+                "status": "{{ 'Never Used' if policy.last_used == 0 else 'Previously Used' }}"
               }{{ ',' if not loop.last else '' }}
               {% endfor %}
             ]
           }
           ===================================
 
-    - name: 🎯 最終總結
+    # 建議的後續動作
+    - name: 💡 建議的後續動作
       debug:
         msg: |
-          ========= 🎯 任務完成總結 =========
+          ========= 💡 建議的後續動作 =========
           
-          ✅ 成功連接 FortiGate API
-          ✅ 成功獲取 {{ all_policies.json.results | length }} 條 policies
-          ✅ 識別出 {{ unused_policies | length }} 個 unused policies
+          {% if unused_policies | length > 0 %}
+          🔍 發現 {{ unused_policies | length }} 個 unused policies，建議：
           
-          📋 Unused Policy IDs: 
-          {{ unused_policies | map(attribute='policyid') | list | sort | join(', ') if unused_policies | length > 0 else '無' }}
+          1️⃣ 檢查 Policy 用途:
+          - 使用 GUI 檢視這些 policies 的配置
+          - 確認是否為測試或備用 policies
           
-          💡 解決方案總結:
-          1. API 端點: /api/v2/monitor/firewall/policy
-          2. 篩選條件: bytes = 0 AND packets = 0  
-          3. 時間欄位: last_used (Unix timestamp)
-          4. 相關欄位: hit_count, session_count
+          2️⃣ 安全移除步驟:
+          - 將 policies 設為 disable 而非直接刪除  
+          - 觀察一段時間確認沒有影響
+          - 再考慮完全移除
           
-          🚀 這個 playbook 可以定期執行來監控 unused policies！
-          ===================================
+          3️⃣ 定期監控:
+          - 建議每月執行此 playbook 檢查
+          - 追蹤 unused policies 的變化
+          
+          {% set never_used_count = unused_policies | selectattr('last_used', 'equalto', 0) | list | length %}
+          📊 優先處理建議:
+          - 優先檢查 {{ never_used_count }} 個從未使用的 policies
+          - 謹慎處理曾經使用過的 policies
+          
+          {% else %}
+          ✅ 恭喜！所有 policies 都在使用中
+          💡 建議定期執行此檢查以維持 policy 清潔度
+          {% endif %}
+          =====================================
+
+    - name: 🎯 執行完成
+      debug:
+        msg: |
+          ========= 🎯 任務執行完成 =========
+          
+          ✅ 成功分析 FortiGate unused policies
+          📊 總共檢查了 {{ all_policies.json.results | length }} 條 policies
+          🎯 識別出 {{ unused_policies | length }} 個 unused policies
+          
+          📋 Unused Policy IDs: {{ unused_policies | map(attribute='policyid') | list | sort | join(', ') if unused_policies | length > 0 else '無' }}
+          
+          💾 輸出格式已提供:
+          - 詳細清單
+          - CSV 格式 (可匯入 Excel)
+          - JSON 格式 (程式處理)
+          
+          🚀 Playbook 可以定期執行進行監控！
+          =================================
