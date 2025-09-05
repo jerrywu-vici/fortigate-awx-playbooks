@@ -285,6 +285,7 @@
       delay: "{{ api_delay }}"
       when: 
         - dhcp_enabled
+        - dhcp_result is defined
         - dhcp_result.status == 200
 
     - name: "✅ DHCP Verification Result"
@@ -293,6 +294,7 @@
       when: 
         - dhcp_enabled
         - dhcp_verification is defined
+        - dhcp_verification.json is defined
         - dhcp_verification.json.results | length > 0
 
     - name: "🔍 Verify Address Deletion"
@@ -309,6 +311,7 @@
       delay: "{{ api_delay }}"
       when: 
         - firewall_enabled
+        - address_delete_result is defined
         - address_delete_result.status == 200
 
     - name: "✅ Address Deletion Verification"
@@ -333,6 +336,7 @@
       when: 
         - firewall_enabled
         - address_in_group
+        - group_update_result is defined
         - group_update_result.status == 200
 
     - name: "✅ Address Group Verification"
@@ -341,6 +345,8 @@
       when: 
         - firewall_enabled
         - group_verification is defined
+        - group_verification.json is defined
+        - group_verification.json.results is defined
         - group_verification.json.results | length > 0
 
     # ==================== 最終摘要區塊 ====================
@@ -352,8 +358,8 @@
       ansible.builtin.debug:
         msg: "📊 整合操作結果 | MAC: {{ delete_mac }} | DHCP: {{ dhcp_status }} | Firewall: {{ firewall_status }}"
       vars:
-        dhcp_status: "{{ '✅成功' if (dhcp_enabled and dhcp_result.status == 200) else ('⏭️跳過' if not dhcp_enabled else '❌失敗') }}"
-        firewall_status: "{{ '✅成功' if (firewall_enabled and address_delete_result.status == 200) else ('⏭️跳過' if not firewall_enabled else '❌失敗') }}"
+        dhcp_status: "{{ '✅成功' if (dhcp_enabled and dhcp_result is defined and dhcp_result.status == 200) else ('⏭️跳過' if not dhcp_enabled else '❌失敗') }}"
+        firewall_status: "{{ '✅成功' if (firewall_enabled and address_delete_result is defined and address_delete_result.status == 200) else ('⏭️跳過' if not firewall_enabled else '❌失敗') }}"
 
     - name: "📊 DHCP Summary"
       ansible.builtin.debug:
@@ -364,8 +370,8 @@
       ansible.builtin.debug:
         msg: "📊 Firewall摘要 | Address: {{ firewall_address_name }} | Group: {{ address_group_name }} | Group更新: {{ group_status }} | Address刪除: {{ address_status }}"
       vars:
-        group_status: "{{ '✅成功' if (address_in_group and group_update_result.status == 200) else ('⏭️跳過' if not address_in_group else '❌失敗') }}"
-        address_status: "{{ '✅成功' if address_delete_result.status == 200 else '❌失敗' }}"
+        group_status: "{{ '✅成功' if (address_in_group and group_update_result is defined and group_update_result.status == 200) else ('⏭️跳過' if not address_in_group else '❌失敗') }}"
+        address_status: "{{ '✅成功' if (address_delete_result is defined and address_delete_result.status == 200) else '❌失敗' }}"
       when: firewall_enabled
 
     - name: "📅 Completion Information"
