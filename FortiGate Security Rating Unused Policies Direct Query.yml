@@ -1,12 +1,12 @@
 ---
-- name: Deep Analysis FortiGate Security Rating API
+- name: Simplified FortiGate Security Analysis
   hosts: localhost
   gather_facts: false
   vars:
     fortigate_api_url: "https://{{ fortigate_host }}:{{ fortigate_api_port | default('443') }}"
 
   tasks:
-    - name: 🔍 深度分析成功的 CSF 端點
+    - name: 🔍 測試 CSF 端點
       uri:
         url: "{{ fortigate_api_url }}/api/v2/monitor/system/csf"
         method: GET
@@ -18,97 +18,116 @@
           action: "{{ item }}"
         validate_certs: "{{ fortigate_validate_certs | default(false) }}"
         timeout: 30
-      register: csf_detailed
+      register: csf_results
       loop:
         - "get-security-rating"
         - "get-unused-policies" 
         - "security-rating"
         - "unused-policy"
 
-    - name: 📊 分析 CSF 回應結構
+    - name: 📋 簡潔顯示 CSF 結果
       debug:
         msg: |
-          ========= CSF Action: {{ item.item }} =========
-          Status: {{ item.status }}
-          Response Keys: {{ item.json.keys() | list if item.json is defined else 'No JSON' }}
-          
-          {% if item.json.results is defined %}
-          📋 Results 結構:
-          - Count: {{ item.json.results | length }}
-          - Sample Keys: {{ item.json.results[0].keys() | list if item.json.results | length > 0 else 'Empty' }}
-          {% endif %}
-          
-          {% if item.json.status is defined %}
-          📋 Status: {{ item.json.status }}
-          {% endif %}
-          
-          {% if item.json.message is defined %}
-          📋 Message: {{ item.json.message }}
-          {% endif %}
-          
-          🔍 完整回應: {{ item.json | to_nice_json }}
-          ==========================================
-      loop: "{{ csf_detailed.results }}"
+          🎯 Action: {{ item.item }}
+          ✅ Status: {{ item.status }}
+          📊 Has Results: {{ 'Yes (' + (item.json.results|length|string) + ')' if item.json.results is defined and item.json.results|length > 0 else 'No' }}
+          🔑 Keys: {{ item.json.keys()|list|join(', ') if item.json is defined else 'None' }}
+      loop: "{{ csf_results.results }}"
       when: item.status == 200
 
-    # 嘗試 Policy 相關的直接查詢
-    - name: 🎯 測試直接 Policy 端點
+    # 只顯示有實際資料的內容
+    - name: 🎯 顯示有資料的回應
+      debug:
+        msg: |
+          ========= {{ item.item }} 的資料 =========
+          {% if item.json.results is defined and item.json.results|length > 0 %}
+          📋 找到 {{ item.json.results|length }} 筆資料
+          
+          🔍 第一筆資料的欄位:
+          {{ item.json.results[0].keys()|list|join(', ') }}
+          
+          📊 範例資料:
+          {% for key, value in item.json.results[0].items() %}
+          - {{ key }}: {{ value }}
+          {% endfor %}
+          {% else %}
+          📋 回應內容:
+          {% for key, value in item.json.items() %}
+          - {{ key }}: {{ value }}
+          {% endfor %}
+          {% endif %}
+          =====================================
+      loop: "{{ csf_results.results }}"
+      when: 
+        - item.status == 200
+        - item.json is defined
+        - (item.json.results is defined and item.json.results|length > 0) or (item.json.keys()|list|length > 0)
+
+    # 測試直接的 policy 統計端點
+    - name: 🎯 測試 Policy 統計端點
       uri:
-        url: "{{ fortigate_api_url }}{{ item }}"
+        url: "{{ fortigate_api_url }}/api/v2/monitor/firewall/policy"
         method: GET
         headers:
           Authorization: "Bearer {{ fortigate_access_token }}"
-        body_format: form-urlencoded
+        body_format: form-urlencoded  
         body:
           vdom: "{{ vdom_name | default('root') }}"
         validate_certs: "{{ fortigate_validate_certs | default(false) }}"
         timeout: 30
         status_code: [200, 400, 404]
-      register: policy_tests
-      loop:
-        - "/api/v2/monitor/firewall/policy"
-        - "/api/v2/monitor/firewall/policy/usage"
-        - "/api/v2/monitor/system/policy-statistics"
-        - "/api/v2/cmdb/firewall/policy"
+      register: policy_stats
       failed_when: false
 
-    - name: 📈 顯示 Policy 端點結果
+    - name: 📊 Policy 統計結果
       debug:
         msg: |
-          {{ item.item }}: {{ '✅' if item.status == 200 else '❌' }} ({{ item.status }})
-          {% if item.status == 200 and item.json.results is defined %}
-          - Results: {{ item.json.results | length }} policies
-          {% elif item.status == 200 %}
-          - Keys: {{ item.json.keys() | list }}
+          🎯 Policy Monitor API: {{ '✅' if policy_stats.status == 200 else '❌' }} ({{ policy_stats.status }})
+          {% if policy_stats.status == 200 and policy_stats.json.results is defined %}
+          📋 找到 {{ policy_stats.json.results|length }} 條 policies
+          
+          🔍 Policy 欄位:
+          {{ policy_stats.json.results[0].keys()|list|join(', ') if policy_stats.json.results|length > 0 else 'No policies' }}
+          
+          📊 有 bytes/packets 的 policies:
+          {% set policies_with_stats = policy_stats.json.results | selectattr('bytes', 'defined') | list %}
+          {{ policies_with_stats|length }} / {{ policy_stats.json.results|length }}
+          
+          {% if policies_with_stats|length > 0 %}
+          🔍 範例 (有流量統計):
+          {% for policy in policies_with_stats[:2] %}
+          - Policy: {{ policy.name | default('N/A') }} | Bytes: {{ policy.bytes | default(0) }} | Packets: {{ policy.packets | default(0) }}
+          {% endfor %}
           {% endif %}
-      loop: "{{ policy_tests.results }}"
+          {% endif %}
+      when: policy_stats.status == 200
 
-    # 如果找到policy資料，分析usage資訊
-    - name: 🔍 分析 Policy Usage 資料
+    # 總結發現
+    - name: 🎯 總結發現
       debug:
         msg: |
-          ========= Policy Usage Analysis =========
-          {% set policies_found = false %}
-          {% for test in policy_tests.results %}
-          {% if test.status == 200 and test.json.results is defined %}
-          {% set policies_found = true %}
-          📋 從 {{ test.item }} 找到 {{ test.json.results | length }} 條 policies
+          ========= 🎯 分析總結 =========
           
-          {% for policy in test.json.results[:3] %}
-          Policy {{ policy.policyid | default('N/A') }}:
-          - Name: {{ policy.name | default('N/A') }}
-          - Last Used: {{ policy.last_used | default('Never') }}
-          - Bytes: {{ policy.bytes | default(0) }}
-          - Packets: {{ policy.packets | default(0) }}
-          {% endfor %}
-          {% if test.json.results | length > 3 %}
-          ... (showing first 3 of {{ test.json.results | length }})
-          {% endif %}
+          ✅ CSF 成功端點: {{ csf_results.results | selectattr('status', 'equalto', 200) | list | length }}/4
+          ✅ Policy API: {{ '成功' if policy_stats.status == 200 else '失敗' }}
+          
+          📊 發現的資料:
+          {% set found_data = false %}
+          {% for item in csf_results.results %}
+          {% if item.status == 200 and item.json.results is defined and item.json.results|length > 0 %}
+          {% set found_data = true %}
+          - {{ item.item }}: {{ item.json.results|length }} 筆
           {% endif %}
           {% endfor %}
-          
-          {% if not policies_found %}
-          ⚠️ 尚未在直接 policy 端點找到 usage 資料
+          {% if policy_stats.status == 200 and policy_stats.json.results is defined %}
+          {% set found_data = true %}
+          - Policy Monitor: {{ policy_stats.json.results|length }} 筆
           {% endif %}
-          ==========================================
-      when: policy_tests.results | selectattr('status', 'equalto', 200) | list | length > 0
+          
+          💡 下一步建議:
+          {% if found_data %}
+          ✅ 找到資料，可以進一步分析是否包含 unused policy 資訊
+          {% else %}
+          ⚠️ 需要在 FortiGate GUI 中先執行 Security Rating 分析
+          {% endif %}
+          ==============================
