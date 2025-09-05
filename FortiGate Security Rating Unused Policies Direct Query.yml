@@ -1,5 +1,5 @@
 ---
-- name: Extract FortiGate Security Rating Unused Policies (Fixed Slice)
+- name: Find FortiGate Unused Policies in Security Rating Data
   hosts: localhost
   gather_facts: false
   vars:
@@ -21,182 +21,175 @@
         timeout: 30
       register: security_rating_data
 
-    - name: 📋 顯示基本資訊
+    - name: 📊 分析關鍵欄位的資料類型和大小
       debug:
         msg: |
-          ✅ Status: {{ security_rating_data.status }}
-          📊 Response Keys: {{ security_rating_data.json.keys()|list }}
-          📈 Results Count: {{ security_rating_data.json.results|length if security_rating_data.json.results is defined else 0 }}
-          🏢 Devices Count: {{ security_rating_data.json.devices|length if security_rating_data.json.devices is defined else 0 }}
-
-    - name: 🔍 分析 Results 結構
-      debug:
-        msg: |
-          ========= 📊 Results 分析 =========
-          {% if security_rating_data.json.results is defined %}
-          {% for result in security_rating_data.json.results %}
-          {% if loop.index <= 3 %}
+          ========= 📊 關鍵欄位分析 =========
+          {% for key, value in security_rating_data.json.items() %}
+          {% if key in ['devices', 'perDeviceStatistics', 'perCheckStatistics', 'perCategoryStatistics', 'weekHistory', 'statistics'] %}
           
-          📋 Result {{ loop.index }}:
-          {% if result is mapping %}
-          - Type: Dictionary
-          - Keys: {{ result.keys()|list }}
-          {% if result.name is defined %}
-          - Name: {{ result.name }}
-          {% endif %}
-          {% if result.category is defined %}
-          - Category: {{ result.category }}
-          {% endif %}
-          {% if result.checkName is defined %}
-          - Check Name: {{ result.checkName }}
-          {% endif %}
-          {% else %}
-          - Type: String/Other
-          - Value: {{ result }}
-          {% endif %}
-          
-          {% endif %}
-          {% endfor %}
-          {% if security_rating_data.json.results|length > 3 %}
-          ... (showing 3 of {{ security_rating_data.json.results|length }})
-          {% endif %}
-          {% endif %}
-          =================================
-
-    - name: 🏢 分析 Devices 資料
-      debug:
-        msg: |
-          ========= 🏢 Devices 分析 =========
-          {% if security_rating_data.json.devices is defined %}
-          
-          📊 設備總數: {{ security_rating_data.json.devices|length }}
-          
-          {% for device in security_rating_data.json.devices %}
-          {% if loop.index <= 2 %}
-          
-          📱 Device {{ loop.index }}:
-          {% if device is mapping %}
-          - Keys: {{ device.keys()|list }}
-          {% if device.deviceName is defined %}
-          - Name: {{ device.deviceName }}
-          {% endif %}
-          {% if device.serialNumber is defined %}
-          - Serial: {{ device.serialNumber }}
+          🔍 {{ key }}:
+          - Type: {{ value|type_debug }}
+          - Size: {{ value|length if value is iterable and value is not string else 'N/A' }}
+          {% if value is iterable and value is not string and value|length > 0 %}
+          {% set first_item = value[0] if value is sequence else value.values()|list|first %}
+          - First Item Type: {{ first_item|type_debug }}
+          {% if first_item is mapping %}
+          - First Item Keys: {{ first_item.keys()|list }}
           {% endif %}
           {% endif %}
           
           {% endif %}
           {% endfor %}
-          {% endif %}
-          ===============================
-
-    # 專門尋找 unused policy 相關資料
-    - name: 🎯 搜尋所有欄位中的 Unused Policy 資訊
-      debug:
-        msg: |
-          ========= 🔍 深度搜尋 Unused Policies =========
-          
-          {% set found_policies = [] %}
-          
-          🔍 搜尋 Results 中的 Policy 資訊:
-          {% if security_rating_data.json.results is defined %}
-          {% for result in security_rating_data.json.results %}
-          {% if result is mapping %}
-          {% if 'unused' in result|string|lower or 'policy' in result|string|lower %}
-          
-          🎯 在 Results 中找到可能的 Policy 資訊:
-          {% if result.checkName is defined %}
-          - Check Name: {{ result.checkName }}
-          {% endif %}
-          {% if result.category is defined %}
-          - Category: {{ result.category }}
-          {% endif %}
-          {% if result.deviceResults is defined %}
-          - Device Results: {{ result.deviceResults|length }} 個設備
-          
-          {% for deviceResult in result.deviceResults %}
-          {% if deviceResult.details is defined %}
-          🎯 Device Details 找到！
-          {% if deviceResult.details.policies is defined %}
-          📋 Policies: {{ deviceResult.details.policies|length }} 個
-          {% for policy in deviceResult.details.policies %}
-          {% if loop.index <= 5 %}
-          - Policy {{ policy.id if policy.id is defined else 'N/A' }}: Last Used {{ policy.lastUsed if policy.lastUsed is defined else 'Never' }}
-          {% endif %}
-          {% endfor %}
-          {% endif %}
-          {% endif %}
-          {% endfor %}
-          
-          {% endif %}
-          {% endif %}
-          {% endif %}
-          {% endfor %}
-          {% endif %}
-          
-          🔍 搜尋 Devices 中的 Policy 資訊:
-          {% if security_rating_data.json.devices is defined %}
-          {% for device in security_rating_data.json.devices %}
-          {% if device is mapping and device.deviceResults is defined %}
-          {% for deviceResult in device.deviceResults %}
-          {% if deviceResult is mapping and 'unused' in deviceResult|string|lower %}
-          
-          🎯 在 Device Results 中找到 Unused 資訊:
-          Device: {{ device.deviceName if device.deviceName is defined else 'Unknown' }}
-          
-          {% endif %}
-          {% endfor %}
-          {% endif %}
-          {% endfor %}
-          {% endif %}
-          ==========================================
-
-    # 如果上面沒找到，顯示更詳細的結構
-    - name: 📝 如果沒找到，顯示詳細結構
-      debug:
-        msg: |
-          ========= 📝 詳細結構分析 =========
-          
-          {% if security_rating_data.json.results is defined %}
-          🔍 第一個 Result 的完整結構:
-          {% for result in security_rating_data.json.results %}
-          {% if loop.index == 1 and result is mapping %}
-          {{ result | to_nice_json }}
-          {% endif %}
-          {% if loop.index == 1 %}
-          {% break %}
-          {% endif %}
-          {% endfor %}
-          {% endif %}
-          
-          {% if security_rating_data.json.devices is defined %}
-          🔍 第一個 Device 的完整結構:
-          {% for device in security_rating_data.json.devices %}
-          {% if loop.index == 1 and device is mapping %}
-          {{ device | to_nice_json }}
-          {% endif %}
-          {% if loop.index == 1 %}
-          {% break %}
-          {% endif %}
-          {% endfor %}
-          {% endif %}
           ===================================
 
-    - name: 💡 下一步建議
+    - name: 🏢 詳細分析第一個 Device
       debug:
         msg: |
-          💡 根據API回應分析:
+          ========= 🏢 第一個設備詳細資料 =========
+          {% if security_rating_data.json.devices is defined and security_rating_data.json.devices|length > 0 %}
+          {% set first_device = security_rating_data.json.devices[0] %}
           
-          ✅ API 成功取得資料
-          📊 共有 {{ security_rating_data.json.results|length if security_rating_data.json.results is defined else 0 }} 個檢查結果
-          🏢 共有 {{ security_rating_data.json.devices|length if security_rating_data.json.devices is defined else 0 }} 個設備
+          📱 設備資訊:
+          {% for key, value in first_device.items() %}
+          - {{ key }}: {{ value }}
+          {% endfor %}
           
-          🔍 尋找策略:
-          1. 檢查 results[] 中是否有 checkName 包含 "Unused Policies"
-          2. 分析 deviceResults[].details.policies 結構
-          3. 尋找包含 policy ID 和 lastUsed 時間的資料
+          {% else %}
+          ⚠️ 沒有設備資料
+          {% endif %}
+          ======================================
+
+    - name: 📈 分析 perDeviceStatistics (可能包含 Policy 統計)
+      debug:
+        msg: |
+          ========= 📈 perDeviceStatistics 分析 =========
+          {% if security_rating_data.json.perDeviceStatistics is defined %}
           
-          📋 如果仍未找到，可能需要:
-          - 確認GUI中的分析已完成
-          - 嘗試不同的 report_type 參數
-          - 檢查是否需要特定的權限或授權
+          📊 統計資料類型: {{ security_rating_data.json.perDeviceStatistics|type_debug }}
+          📊 統計資料大小: {{ security_rating_data.json.perDeviceStatistics|length if security_rating_data.json.perDeviceStatistics is iterable and security_rating_data.json.perDeviceStatistics is not string else 'N/A' }}
+          
+          {% if security_rating_data.json.perDeviceStatistics is mapping %}
+          🔍 統計欄位:
+          {% for key, value in security_rating_data.json.perDeviceStatistics.items() %}
+          - {{ key }}: {{ value|type_debug }} ({{ value|length if value is iterable and value is not string else value }})
+          {% endfor %}
+          {% endif %}
+          
+          {% endif %}
+          ============================================
+
+    - name: 🔍 檢查 perCheckStatistics (檢查統計)
+      debug:
+        msg: |
+          ========= 🔍 perCheckStatistics 分析 =========
+          {% if security_rating_data.json.perCheckStatistics is defined %}
+          
+          📊 檢查統計類型: {{ security_rating_data.json.perCheckStatistics|type_debug }}
+          
+          {% if security_rating_data.json.perCheckStatistics is mapping %}
+          🎯 尋找 Unused Policy 相關檢查:
+          {% for check_name, check_data in security_rating_data.json.perCheckStatistics.items() %}
+          {% if 'unused' in check_name|lower or 'policy' in check_name|lower %}
+          
+          🎯 找到相關檢查: {{ check_name }}
+          - 資料: {{ check_data }}
+          
+          {% endif %}
+          {% endfor %}
+          
+          📋 所有檢查項目:
+          {% for check_name in security_rating_data.json.perCheckStatistics.keys() %}
+          - {{ check_name }}
+          {% endfor %}
+          {% endif %}
+          
+          {% endif %}
+          ===========================================
+
+    # 嘗試直接存取特定的 unused policy 檢查結果
+    - name: 🎯 嘗試取得 Unused Policy 具體資料
+      uri:
+        url: "{{ fortigate_api_url }}/api/v2/monitor/system/security-rating"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        body_format: form-urlencoded
+        body:
+          report_type: "TopologyReport"
+          id: "{{ security_rating_id | default('1757052908321') }}"
+          vdom: "{{ vdom_name | default('root') }}"
+          checkName: "unused-policies"  # 嘗試特定檢查
+        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
+        timeout: 30
+        status_code: [200, 400, 404]
+      register: unused_policy_check
+      failed_when: false
+
+    - name: 📋 顯示 Unused Policy 檢查結果
+      debug:
+        msg: |
+          🎯 Unused Policy 特定檢查: {{ '✅' if unused_policy_check.status == 200 else '❌' }} ({{ unused_policy_check.status }})
+          {% if unused_policy_check.status == 200 %}
+          📊 回應欄位: {{ unused_policy_check.json.keys()|list if unused_policy_check.json is defined else 'No JSON' }}
+          {% endif %}
+
+    # 嘗試使用 CSF API 的 unused-policy action
+    - name: 🚀 嘗試 CSF unused-policy action
+      uri:
+        url: "{{ fortigate_api_url }}/api/v2/monitor/system/csf"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        body_format: form-urlencoded
+        body:
+          vdom: "{{ vdom_name | default('root') }}"
+          action: "unused-policy"
+        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
+        timeout: 30
+        status_code: [200, 400, 404]
+      register: csf_unused_policy
+      failed_when: false
+
+    - name: 📊 顯示 CSF Unused Policy 結果
+      debug:
+        msg: |
+          🎯 CSF unused-policy: {{ '✅' if csf_unused_policy.status == 200 else '❌' }} ({{ csf_unused_policy.status }})
+          {% if csf_unused_policy.status == 200 and csf_unused_policy.json is defined %}
+          
+          📋 CSF 回應結構:
+          {% for key, value in csf_unused_policy.json.items() %}
+          - {{ key }}: {{ value|type_debug }} ({{ value|length if value is iterable and value is not string else value }})
+          {% endfor %}
+          
+          {% if csf_unused_policy.json.results is defined %}
+          🎯 CSF Results 內容:
+          {{ csf_unused_policy.json.results | to_nice_json }}
+          {% endif %}
+          
+          {% endif %}
+
+    - name: 💡 總結和下一步建議
+      debug:
+        msg: |
+          ========= 💡 分析總結 =========
+          
+          ✅ Security Rating API 成功
+          📊 主要資料結構:
+          - results: 字串陣列 (類別名稱)
+          - devices: {{ security_rating_data.json.devices|length }} 個設備
+          - perDeviceStatistics: 設備統計
+          - perCheckStatistics: 檢查統計
+          
+          🔍 可能的 Policy 資料位置:
+          1. perCheckStatistics 中的特定檢查項目
+          2. CSF API 的 unused-policy action
+          3. 需要其他 report_type 參數
+          
+          🎯 下一步建議:
+          {% if csf_unused_policy.status == 200 %}
+          ✅ CSF API 有回應，檢查是否包含 policy 資料
+          {% else %}
+          ⚠️ 可能需要在 GUI 中先執行完整的 Security Rating 分析
+          {% endif %}
+          =============================
