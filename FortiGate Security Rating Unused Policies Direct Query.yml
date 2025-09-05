@@ -1,5 +1,5 @@
 ---
-- name: Deep Dive FortiGate Security Rating Unused Policies
+- name: Fixed FortiGate Security Rating Deep Exploration
   hosts: localhost
   gather_facts: true
   vars:
@@ -8,9 +8,9 @@
   tasks:
     - name: 深入探索 Security Rating
       debug:
-        msg: "🔍 深入探索 Security Rating 實際資料..."
+        msg: "🔍 修正版：深入探索 Security Rating 實際資料..."
 
-    # =================== 嘗試不同的 Security Rating 參數 ===================
+    # =================== 測試不同的 Security Rating 參數 ===================
     - name: 測試 Security Rating 的不同參數組合
       uri:
         url: "{{ fortigate_api_url }}/api/v2/monitor/system/security-rating"
@@ -57,26 +57,29 @@
             details: "true"
       failed_when: false
 
-    - name: 顯示 Security Rating 測試結果
+    - name: 顯示 Security Rating 測試結果（修正版）
       debug:
         msg: |
           ========= {{ item.item.name }} =========
           參數: {{ item.item.params }}
-          狀態: {{ item.status }}
+          狀態碼: {{ item.status }}
           {% if item.status == 200 %}
-          {% if item.json != security_rating_tests.results[0].json %}
-          🎯 發現不同的回應內容!
-          {% endif %}
-          回應大小: {{ item.content | length }} 字元
+          回應長度: {{ (item.json | string) | length }} 字元
           {% if item.json is defined and item.json.results is defined %}
           結果筆數: {{ item.json.results | length }}
+          {% elif item.json is defined %}
+          主要欄位: {{ item.json.keys() | list }}
           {% endif %}
+          {% if item.json != security_rating_tests.results[0].json %}
+          🎯 與基本查詢回應不同！
+          {% endif %}
+          {% elif item.status == 400 %}
+          錯誤: {{ item.json.error | default('參數錯誤') }}
           {% endif %}
           ================================
       loop: "{{ security_rating_tests.results }}"
-      when: item.status == 200
 
-    # =================== 探索其他可能的 Security Rating 端點 ===================
+    # =================== 探索其他可能的端點 ===================
     - name: 探索其他 Security Rating 相關端點
       uri:
         url: "{{ fortigate_api_url }}{{ item }}"
@@ -89,74 +92,59 @@
         validate_certs: "{{ fortigate_validate_certs | default(false) }}"
         timeout: "{{ fortigate_timeout | default('30') | int }}"
         status_code: [200, 400, 404, 500]
-      register: other_endpoints_test
+      register: other_endpoints
       loop:
         - "/api/v2/monitor/system/security-rating/results"
-        - "/api/v2/monitor/system/security-rating/data"  
-        - "/api/v2/monitor/system/security-rating/score"
         - "/api/v2/monitor/system/security-rating/recommendations"
         - "/api/v2/monitor/system/security-rating/unused-policies"
         - "/api/v2/monitor/system/security-rating/optimization"
-        - "/api/v2/monitor/system/security-rating/assessment"
         - "/api/v2/monitor/firewall/security-rating"
         - "/api/v2/monitor/system/csf/security-rating"
-        - "/api/v2/monitor/log/security-rating"
       failed_when: false
 
-    - name: 顯示其他端點測試結果  
+    - name: 顯示其他端點結果
       debug:
         msg: |
           ========= {{ item.item }} =========
           狀態: {{ item.status }}
           {% if item.status == 200 %}
-          ✅ 成功! 回應大小: {{ item.content | length }} 字元
+          ✅ 成功訪問！
           {% if item.json is defined %}
           {% if item.json.results is defined %}
           結果數量: {{ item.json.results | length }}
           {% endif %}
-          主要欄位: {{ item.json.keys() | list }}
+          回應結構: {{ item.json.keys() | list }}
           {% endif %}
           {% elif item.status == 400 %}
-          ⚠️ 端點存在但參數不正確
+          ⚠️ 端點存在，參數問題: {{ item.json.error | default('未知錯誤') }}
           {% elif item.status == 404 %}
           ❌ 端點不存在
           {% endif %}
-          ============================
-      loop: "{{ other_endpoints_test.results }}"
+          =============================
+      loop: "{{ other_endpoints.results }}"
 
-    # =================== 嘗試 POST 方法觸發 Security Rating ===================
-    - name: 嘗試觸發 Security Rating 計算
-      uri:
-        url: "{{ fortigate_api_url }}/api/v2/monitor/system/security-rating"
-        method: POST
-        headers:
-          Authorization: "Bearer {{ fortigate_access_token }}"
-          Content-Type: "application/json"
-        body_format: json
-        body:
-          vdom: "{{ vdom_name | default('root') }}"
-          action: "start"
-        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
-        timeout: "{{ fortigate_timeout | default('30') | int }}"
-        status_code: [200, 400, 404, 405]
-      register: security_rating_trigger
-      failed_when: false
-
-    - name: 顯示觸發結果
+    # =================== 詳細顯示有數據的回應 ===================
+    - name: 顯示成功回應的詳細內容
       debug:
         msg: |
-          ========= Security Rating 觸發測試 =========
-          狀態: {{ security_rating_trigger.status }}
-          {% if security_rating_trigger.status == 200 %}
-          ✅ 成功觸發 Security Rating 計算
-          回應: {{ security_rating_trigger.json | default('無JSON回應') }}
-          {% elif security_rating_trigger.status == 405 %}
-          ℹ️ 不支援 POST 方法
+          ========= 詳細回應內容: {{ item.item if item.item is string else item.url }} =========
+          {% if item.json is defined %}
+          {% if item.json | length > 5 %}
+          完整JSON回應:
+          {{ item.json | to_nice_json }}
+          {% else %}
+          回應內容: {{ item.json }}
           {% endif %}
-          ======================================
+          {% endif %}
+          ===================================================
+      loop: "{{ (security_rating_tests.results + other_endpoints.results) }}"
+      when: 
+        - item.status == 200
+        - item.json is defined
+        - item.json != security_rating_tests.results[0].json  # 排除重複的靜態回應
 
-    # =================== 探索 CSF (Security Fabric) 相關 ===================
-    - name: 探索 Security Fabric 端點
+    # =================== 嘗試查詢系統資訊 ===================
+    - name: 查詢系統版本和功能
       uri:
         url: "{{ fortigate_api_url }}{{ item }}"
         method: GET
@@ -168,122 +156,113 @@
         validate_certs: "{{ fortigate_validate_certs | default(false) }}"
         timeout: "{{ fortigate_timeout | default('30') | int }}"
         status_code: [200, 400, 404]
-      register: csf_endpoints_test
-      loop:
-        - "/api/v2/monitor/system/csf"
-        - "/api/v2/monitor/system/csf/pending"
-        - "/api/v2/monitor/system/csf/fabric-device"
-        - "/api/v2/cmdb/system/csf"
-      failed_when: false
-
-    # =================== 嘗試查詢系統狀態和功能 ===================
-    - name: 查詢系統功能狀態
-      uri:
-        url: "{{ fortigate_api_url }}{{ item }}"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ fortigate_access_token }}"
-        body_format: form-urlencoded
-        body:
-          vdom: "{{ vdom_name | default('root') }}"
-        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
-        timeout: "{{ fortigate_timeout | default('30') | int }}"
-        status_code: [200, 400, 404]
-      register: system_status_test
+      register: system_info
       loop:
         - "/api/v2/monitor/system/status"
-        - "/api/v2/monitor/system/feature-select"
         - "/api/v2/monitor/license/status"
-        - "/api/v2/monitor/system/feature"
+        - "/api/v2/cmdb/system/global"
       failed_when: false
 
-    - name: 檢查系統是否支援 Security Rating
+    - name: 顯示系統資訊
       debug:
         msg: |
-          ========= 系統功能檢查 =========
-          {% for result in system_status_test.results %}
+          ========= 系統資訊 =========
+          {% for result in system_info.results %}
           {% if result.status == 200 %}
           
-          {{ result.item }} 回應:
-          {% if result.json is defined %}
-          {% if 'security' in result.json | string | lower %}
-          🔍 發現 Security 相關功能
+          {{ result.item }}:
+          {% if result.json.version is defined %}
+          版本: {{ result.json.version }}
           {% endif %}
-          {% if 'rating' in result.json | string | lower %}
-          🎯 發現 Rating 相關功能  
+          {% if result.json.build is defined %}
+          Build: {{ result.json.build }}
           {% endif %}
-          {% if result.json.results is defined %}
-          功能數量: {{ result.json.results | length }}
+          {% if 'security' in (result.json | string | lower) %}
+          🔍 包含 Security 相關資訊
           {% endif %}
+          {% if 'rating' in (result.json | string | lower) %}
+          🔍 包含 Rating 相關資訊
           {% endif %}
           {% endif %}
           {% endfor %}
-          ============================
+          =========================
 
-    # =================== 嘗試查詢 Policy 相關的優化建議 ===================
-    - name: 探索 Policy 優化相關端點
+    # =================== 嘗試不同的 monitor API ===================
+    - name: 探索 monitor API 類別
       uri:
-        url: "{{ fortigate_api_url }}{{ item }}"
+        url: "{{ fortigate_api_url }}/api/v2/monitor/{{ item }}"
         method: GET
         headers:
           Authorization: "Bearer {{ fortigate_access_token }}"
-        body_format: form-urlencoded
-        body:
-          vdom: "{{ vdom_name | default('root') }}"
         validate_certs: "{{ fortigate_validate_certs | default(false) }}"
-        timeout: "{{ fortigate_timeout | default('30') | int }}"
+        timeout: "{{ fortigate_timeout | default('15') | int }}"
         status_code: [200, 400, 404]
-      register: policy_optimization_test
+      register: monitor_categories
       loop:
-        - "/api/v2/monitor/firewall/policy-lookup"
-        - "/api/v2/monitor/firewall/policy-match"
-        - "/api/v2/monitor/system/sandbox/stats"
-        - "/api/v2/monitor/firewall/consolidated-policy"
-        - "/api/v2/monitor/log/policy-archive"
+        - "system"
+        - "firewall" 
+        - "log"
       failed_when: false
 
-    # =================== 顯示所有成功的端點完整資料 ===================
-    - name: 列出所有發現的有用端點
-      set_fact:
-        successful_endpoints: "{{ all_successful }}"
-      vars:
-        all_successful: |
-          [
-          {% for test_group in [security_rating_tests.results, other_endpoints_test.results, csf_endpoints_test.results, system_status_test.results, policy_optimization_test.results] %}
-          {% for result in test_group %}
-          {% if result.status == 200 %}
-          {
-            "endpoint": "{{ result.url | default(result.item) }}",
-            "status": {{ result.status }},
-            "content_length": {{ result.content | length }},
-            "has_results": {{ result.json.results is defined }},
-            "result_count": {{ result.json.results | length if result.json.results is defined else 0 }},
-            "keys": {{ result.json.keys() | list if result.json is defined else [] }}
-          },
-          {% endif %}
-          {% endfor %}
-          {% endfor %}
-          ]
-
-    - name: 總結探索發現
+    - name: 顯示 monitor API 類別
       debug:
         msg: |
-          🎯 FortiGate Security Rating 深度探索完成!
+          ========= Monitor API 類別 =========
+          {% for result in monitor_categories.results %}
+          {% if result.status == 200 %}
           
-          📊 發現摘要:
-          - 成功訪問的端點: {{ successful_endpoints | length }}
-          - Security Rating 基礎端點可訪問但只返回靜態常數
-          - 需要進一步測試特定參數或觸發機制
+          /api/v2/monitor/{{ result.item }}:
+          {% if result.json.results is defined %}
+          可用子類別數量: {{ result.json.results | length }}
+          子類別列表:
+          {% for subcat in result.json.results[:10] %}
+          - {{ subcat.name | default(subcat) }}
+          {% endfor %}
+          {% if result.json.results | length > 10 %}
+          ... 還有 {{ result.json.results | length - 10 }} 個
+          {% endif %}
+          {% endif %}
+          {% endif %}
+          {% endfor %}
+          ================================
+
+    # =================== 總結探索結果 ===================
+    - name: 總結探索結果
+      debug:
+        msg: |
+          🎯 Security Rating 探索總結
+          
+          📊 測試結果:
+          - Security Rating 基礎 API 可訪問
+          - 測試了 {{ security_rating_tests.results | length }} 種參數組合
+          - 測試了 {{ other_endpoints.results | length }} 個相關端點
+          
+          📍 發現:
+          {% set successful = [] %}
+          {% set different_responses = [] %}
+          {% for result in (security_rating_tests.results + other_endpoints.results) %}
+          {% if result.status == 200 %}
+          {% set _ = successful.append(result) %}
+          {% if result.json != security_rating_tests.results[0].json %}
+          {% set _ = different_responses.append(result) %}
+          {% endif %}
+          {% endif %}
+          {% endfor %}
+          
+          - 成功訪問: {{ successful | length }} 個端點
+          - 有不同回應: {{ different_responses | length }} 個端點
           
           💡 下一步建議:
-          1. 檢查 FortiGate GUI 中是否已啟用 Security Rating
-          2. 確認是否有相關授權
-          3. 查看 FortiGate 文檔中 Security Rating 的具體 API 用法
-          4. 可能需要先在 GUI 中執行一次 Security Rating 分析
+          {% if different_responses | length == 0 %}
+          - 所有回應都是相同的靜態常數
+          - 可能需要在 FortiGate GUI 中先啟動 Security Rating
+          - 或者該功能需要特定授權
+          - 建議使用傳統方式查詢 Policy 統計
+          {% else %}
+          - 發現了 {{ different_responses | length }} 個有實際資料的端點
+          - 可以進一步分析這些端點的資料結構
+          {% endif %}
           
           🔧 替代方案:
-          如果內建的 Security Rating API 不易取得資料，
-          我們可以繼續使用之前的方法逐一查詢 Policy 使用統計
-          
-          ⚠️ 重要發現:
-          {{ successful_endpoints | selectattr('has_results', 'equalto', true) | list | length }} 個端點有實際資料結構
+          - 使用 /api/v2/monitor/firewall/policy/select 逐一查詢
+          - 或使用 CLI 命令取得統計資料
