@@ -1,5 +1,5 @@
 ---
-- name: FortiGate Unused Policies Extractor (Fixed)
+- name: FortiGate Unused Policies Extractor (Safe Version)
   hosts: localhost
   gather_facts: false
   vars:
@@ -19,9 +19,24 @@
         timeout: 30
       register: all_policies
 
-    - name: 🔍 篩選 Unused Policies
+    - name: 🔍 檢查第一個 Policy 的欄位結構
+      debug:
+        msg: |
+          ========= 🔍 Policy 欄位結構分析 =========
+          {% if all_policies.json.results | length > 0 %}
+          📋 第一個 Policy 的可用欄位:
+          {{ all_policies.json.results[0].keys() | list }}
+          
+          📊 範例資料:
+          {% for key, value in all_policies.json.results[0].items() %}
+          - {{ key }}: {{ value }}
+          {% endfor %}
+          {% endif %}
+          =========================================
+
+    - name: 🔍 安全篩選 Unused Policies
       set_fact:
-        unused_policies: "{{ all_policies.json.results | selectattr('bytes', 'equalto', 0) | selectattr('packets', 'equalto', 0) | list }}"
+        unused_policies: "{{ all_policies.json.results | selectattr('bytes', 'defined') | selectattr('packets', 'defined') | selectattr('bytes', 'equalto', 0) | selectattr('packets', 'equalto', 0) | list }}"
 
     - name: 📊 Policy 統計總覽
       debug:
@@ -32,7 +47,9 @@
           🎯 Unused Policies: {{ unused_policies | length }}
           📊 Used Policies: {{ (all_policies.json.results | length) - (unused_policies | length) }}
           
+          {% if all_policies.json.results | length > 0 %}
           📈 Unused 比例: {{ ((unused_policies | length / all_policies.json.results | length) * 100) | round(1) }}%
+          {% endif %}
           ====================================
 
     - name: 🎯 顯示 Unused Policies 清單
@@ -43,13 +60,17 @@
           {% if unused_policies | length > 0 %}
           {% for policy in unused_policies | sort(attribute='policyid') %}
           
-          📋 Policy {{ policy.policyid }}:
-          - Bytes: {{ policy.bytes }}
-          - Packets: {{ policy.packets }}  
-          - Hit Count: {{ policy.hit_count }}
-          - Session Count: {{ policy.session_count }}
-          - Last Used: {{ 'Never' if policy.last_used == 0 else (policy.last_used | int | strftime('%Y-%m-%d %H:%M:%S')) }}
-          - First Used: {{ 'Never' if policy.first_used == 0 else (policy.first_used | int | strftime('%Y-%m-%d %H:%M:%S')) }}
+          📋 Policy {{ policy.policyid | default('N/A') }}:
+          - Bytes: {{ policy.bytes | default('N/A') }}
+          - Packets: {{ policy.packets | default('N/A') }}  
+          - Hit Count: {{ policy.hit_count | default('N/A') }}
+          - Session Count: {{ policy.session_count | default('N/A') }}
+          - Active Sessions: {{ policy.active_sessions | default('N/A') }}
+          - Last Used: {{ 'Never' if (policy.last_used | default(0)) == 0 else ((policy.last_used | int) | strftime('%Y-%m-%d %H:%M:%S')) }}
+          - First Used: {{ 'Never' if (policy.first_used | default(0)) == 0 else ((policy.first_used | int) | strftime('%Y-%m-%d %H:%M:%S')) }}
+          {% if policy.session_last_used is defined %}
+          - Session Last Used: {{ 'Never' if policy.session_last_used == 0 else (policy.session_last_used | int | strftime('%Y-%m-%d %H:%M:%S')) }}
+          {% endif %}
           
           {% endfor %}
           {% else %}
@@ -63,15 +84,17 @@
           ========= 📋 Unused Policies 摘要 =========
           
           {% if unused_policies | length > 0 %}
-          {% set never_used = unused_policies | selectattr('last_used', 'equalto', 0) | list %}
-          {% set old_unused = unused_policies | rejectattr('last_used', 'equalto', 0) | list %}
+          {% set never_used = unused_policies | selectattr('last_used', 'defined') | selectattr('last_used', 'equalto', 0) | list %}
+          {% set old_unused = unused_policies | selectattr('last_used', 'defined') | rejectattr('last_used', 'equalto', 0) | list %}
           
           📊 分類統計:
           - Never Used: {{ never_used | length }} policies
           - Previously Used (但現在未使用): {{ old_unused | length }} policies
           
+          {% if never_used | length > 0 %}
           📋 Never Used Policy IDs: 
           {{ never_used | map(attribute='policyid') | list | sort | join(', ') }}
+          {% endif %}
           
           📋 All Unused Policy IDs:
           {{ unused_policies | map(attribute='policyid') | list | sort | join(', ') }}
@@ -81,20 +104,20 @@
           {% endif %}
           =========================================
 
-    # 生成 CSV 格式輸出 (更實用)
+    # 生成安全的 CSV 格式輸出
     - name: 📄 生成 CSV 格式輸出
       debug:
         msg: |
           ========= 📄 CSV 格式輸出 =========
           
-          Policy ID,Bytes,Packets,Hit Count,Session Count,Last Used,First Used,Status
+          Policy ID,Bytes,Packets,Hit Count,Session Count,Active Sessions,Last Used,First Used,Status
           {% for policy in unused_policies | sort(attribute='policyid') %}
-          {{ policy.policyid }},{{ policy.bytes }},{{ policy.packets }},{{ policy.hit_count }},{{ policy.session_count }},"{{ 'Never' if policy.last_used == 0 else (policy.last_used | int | strftime('%Y-%m-%d %H:%M:%S')) }}","{{ 'Never' if policy.first_used == 0 else (policy.first_used | int | strftime('%Y-%m-%d %H:%M:%S')) }}","{{ 'Never Used' if policy.last_used == 0 else 'Previously Used' }}"
+          {{ policy.policyid | default('N/A') }},{{ policy.bytes | default(0) }},{{ policy.packets | default(0) }},{{ policy.hit_count | default('N/A') }},{{ policy.session_count | default('N/A') }},{{ policy.active_sessions | default('N/A') }},"{{ 'Never' if (policy.last_used | default(0)) == 0 else ((policy.last_used | int) | strftime('%Y-%m-%d %H:%M:%S')) }}","{{ 'Never' if (policy.first_used | default(0)) == 0 else ((policy.first_used | int) | strftime('%Y-%m-%d %H:%M:%S')) }}","{{ 'Never Used' if (policy.last_used | default(0)) == 0 else 'Previously Used' }}"
           {% endfor %}
           
           ===================================
 
-    # 生成簡潔的 JSON 輸出
+    # 生成安全的 JSON 輸出
     - name: 📤 生成 JSON 格式輸出
       debug:
         msg: |
@@ -109,60 +132,49 @@
             "summary": {
               "total_policies": {{ all_policies.json.results | length }},
               "unused_policies": {{ unused_policies | length }},
-              "used_policies": {{ (all_policies.json.results | length) - (unused_policies | length) }},
-              "unused_percentage": {{ ((unused_policies | length / all_policies.json.results | length) * 100) | round(1) }}
+              "used_policies": {{ (all_policies.json.results | length) - (unused_policies | length) }}{% if all_policies.json.results | length > 0 %},
+              "unused_percentage": {{ ((unused_policies | length / all_policies.json.results | length) * 100) | round(1) }}{% endif %}
             },
             "unused_policy_ids": {{ unused_policies | map(attribute='policyid') | list | sort }},
             "unused_policies_detail": [
               {% for policy in unused_policies | sort(attribute='policyid') %}
               {
-                "policyid": {{ policy.policyid }},
-                "bytes": {{ policy.bytes }},
-                "packets": {{ policy.packets }},
-                "hit_count": {{ policy.hit_count }},
-                "session_count": {{ policy.session_count }},
-                "last_used_timestamp": {{ policy.last_used }},
-                "last_used_readable": "{{ 'Never' if policy.last_used == 0 else (policy.last_used | int | strftime('%Y-%m-%d %H:%M:%S')) }}",
-                "first_used_timestamp": {{ policy.first_used }},
-                "status": "{{ 'Never Used' if policy.last_used == 0 else 'Previously Used' }}"
+                "policyid": {{ policy.policyid | default('null') }},
+                "bytes": {{ policy.bytes | default(0) }},
+                "packets": {{ policy.packets | default(0) }},
+                "hit_count": {{ policy.hit_count | default('null') }},
+                "session_count": {{ policy.session_count | default('null') }},
+                "active_sessions": {{ policy.active_sessions | default('null') }},
+                "last_used_timestamp": {{ policy.last_used | default(0) }},
+                "last_used_readable": "{{ 'Never' if (policy.last_used | default(0)) == 0 else ((policy.last_used | int) | strftime('%Y-%m-%d %H:%M:%S')) }}",
+                "first_used_timestamp": {{ policy.first_used | default(0) }},
+                "first_used_readable": "{{ 'Never' if (policy.first_used | default(0)) == 0 else ((policy.first_used | int) | strftime('%Y-%m-%d %H:%M:%S')) }}",
+                "status": "{{ 'Never Used' if (policy.last_used | default(0)) == 0 else 'Previously Used' }}"
               }{{ ',' if not loop.last else '' }}
               {% endfor %}
             ]
           }
           ===================================
 
-    # 建議的後續動作
-    - name: 💡 建議的後續動作
+    # 分析可用的時間欄位
+    - name: 🕐 分析時間相關欄位
       debug:
         msg: |
-          ========= 💡 建議的後續動作 =========
+          ========= 🕐 時間欄位分析 =========
           
           {% if unused_policies | length > 0 %}
-          🔍 發現 {{ unused_policies | length }} 個 unused policies，建議：
+          {% set sample_policy = unused_policies[0] %}
           
-          1️⃣ 檢查 Policy 用途:
-          - 使用 GUI 檢視這些 policies 的配置
-          - 確認是否為測試或備用 policies
-          
-          2️⃣ 安全移除步驟:
-          - 將 policies 設為 disable 而非直接刪除  
-          - 觀察一段時間確認沒有影響
-          - 再考慮完全移除
-          
-          3️⃣ 定期監控:
-          - 建議每月執行此 playbook 檢查
-          - 追蹤 unused policies 的變化
-          
-          {% set never_used_count = unused_policies | selectattr('last_used', 'equalto', 0) | list | length %}
-          📊 優先處理建議:
-          - 優先檢查 {{ never_used_count }} 個從未使用的 policies
-          - 謹慎處理曾經使用過的 policies
-          
-          {% else %}
-          ✅ 恭喜！所有 policies 都在使用中
-          💡 建議定期執行此檢查以維持 policy 清潔度
+          📊 第一個 unused policy 的時間欄位:
+          {% for key, value in sample_policy.items() %}
+          {% if 'time' in key|lower or 'used' in key|lower or key in ['last_used', 'first_used', 'session_last_used', 'session_first_used'] %}
+          - {{ key }}: {{ value }} {% if value != 0 and value is number %}({{ value | int | strftime('%Y-%m-%d %H:%M:%S') }}){% endif %}
           {% endif %}
-          =====================================
+          {% endfor %}
+          
+          🔍 建議使用的時間欄位: last_used, session_last_used
+          {% endif %}
+          ===================================
 
     - name: 🎯 執行完成
       debug:
@@ -173,12 +185,16 @@
           📊 總共檢查了 {{ all_policies.json.results | length }} 條 policies
           🎯 識別出 {{ unused_policies | length }} 個 unused policies
           
-          📋 Unused Policy IDs: {{ unused_policies | map(attribute='policyid') | list | sort | join(', ') if unused_policies | length > 0 else '無' }}
+          {% if unused_policies | length > 0 %}
+          📋 Unused Policy IDs: {{ unused_policies | map(attribute='policyid') | list | sort | join(', ') }}
           
-          💾 輸出格式已提供:
-          - 詳細清單
-          - CSV 格式 (可匯入 Excel)
-          - JSON 格式 (程式處理)
+          💡 建議後續動作:
+          1. 檢查這些 policies 的配置和用途
+          2. 考慮將它們設為 disabled 而不是直接刪除
+          3. 定期執行此檢查以維持 policy 清潔度
+          {% else %}
+          🎉 太棒了！沒有發現 unused policies
+          {% endif %}
           
-          🚀 Playbook 可以定期執行進行監控！
+          💾 資料已以多種格式輸出，可用於進一步分析
           =================================
