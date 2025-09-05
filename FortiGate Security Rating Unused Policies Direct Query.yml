@@ -1,12 +1,12 @@
 ---
-- name: Extract FortiGate Security Rating Unused Policies Data
+- name: Extract FortiGate Security Rating Unused Policies Data (Fixed)
   hosts: localhost
   gather_facts: false
   vars:
     fortigate_api_url: "https://{{ fortigate_host }}:{{ fortigate_api_port | default('443') }}"
 
   tasks:
-    - name: 🎯 測試發現的 Security Rating API
+    - name: 🎯 取得 Security Rating 資料
       uri:
         url: "{{ fortigate_api_url }}/api/v2/monitor/system/security-rating"
         method: GET
@@ -21,181 +21,162 @@
         timeout: 30
       register: security_rating_data
 
-    - name: 📋 顯示 Security Rating 回應結構
+    - name: 📋 顯示基本資訊
       debug:
         msg: |
-          🎯 Security Rating API 結果:
           ✅ Status: {{ security_rating_data.status }}
-          📊 Response Keys: {{ security_rating_data.json.keys()|list if security_rating_data.json is defined else 'No JSON' }}
-          
-          {% if security_rating_data.json.results is defined %}
-          📈 Results Count: {{ security_rating_data.json.results|length }}
-          {% endif %}
-      when: security_rating_data.status == 200
+          📊 Response Keys: {{ security_rating_data.json.keys()|list }}
+          📈 Results Count: {{ security_rating_data.json.results|length if security_rating_data.json.results is defined else 0 }}
+          🏢 Devices Count: {{ security_rating_data.json.devices|length if security_rating_data.json.devices is defined else 0 }}
+          🎯 Security Rating Results: {{ security_rating_data.json.securityRatingResults|length if security_rating_data.json.securityRatingResults is defined else 0 }}
 
-    - name: 🔍 分析 Security Rating 資料結構
+    - name: 🔍 分析 Results 結構 (前3筆)
       debug:
         msg: |
-          ========= 🔍 Security Rating 資料分析 =========
-          
+          ========= 📊 Results 分析 =========
           {% if security_rating_data.json.results is defined %}
-          📊 找到 {{ security_rating_data.json.results|length }} 筆結果
+          {% for result in security_rating_data.json.results[:3] %}
           
-          {% for result in security_rating_data.json.results %}
-          
-          📋 結果 {{ loop.index }}:
+          📋 Result {{ loop.index }}:
+          {% if result is mapping %}
+          - Type: Dictionary
           - Keys: {{ result.keys()|list }}
-          {% if result.recommendations is defined %}
-          - 推薦項目數: {{ result.recommendations|length }}
+          {% if result.name is defined %}
+          - Name: {{ result.name }}
           {% endif %}
-          {% if result.unused_policies is defined %}
-          🎯 找到 Unused Policies！
+          {% if result.category is defined %}
+          - Category: {{ result.category }}
+          {% endif %}
+          {% if result.description is defined %}
+          - Description: {{ result.description }}
+          {% endif %}
+          {% else %}
+          - Type: {{ result|type_debug }}
+          - Value: {{ result }}
           {% endif %}
           
           {% endfor %}
-          {% else %}
-          📋 完整回應內容:
-          {{ security_rating_data.json | to_nice_json }}
+          {% if security_rating_data.json.results|length > 3 %}
+          ... (showing 3 of {{ security_rating_data.json.results|length }})
           {% endif %}
-          =============================================
-      when: security_rating_data.status == 200
+          {% endif %}
+          =================================
 
-    # 嘗試不同的 report_type
-    - name: 🔍 測試不同的 Report Type
-      uri:
-        url: "{{ fortigate_api_url }}/api/v2/monitor/system/security-rating"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ fortigate_access_token }}"
-        body_format: form-urlencoded
-        body:
-          report_type: "{{ item }}"
-          id: "{{ security_rating_id | default('1757052908321') }}"
-          vdom: "{{ vdom_name | default('root') }}"
-        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
-        timeout: 30
-        status_code: [200, 400, 404]
-      register: report_type_tests
-      loop:
-        - "SecurityReport"
-        - "PolicyReport"
-        - "UnusedPolicyReport"
-        - "ComplianceReport"
-        - "RecommendationReport"
-      failed_when: false
-
-    - name: 📊 顯示不同 Report Type 結果
+    - name: 🎯 分析 Security Rating Results
       debug:
         msg: |
-          🎯 {{ item.item }}: {{ '✅' if item.status == 200 else '❌' }} ({{ item.status }})
-          {% if item.status == 200 and item.json.results is defined %}
-          📈 Results: {{ item.json.results|length }}
-          {% endif %}
-      loop: "{{ report_type_tests.results }}"
-
-    # 嘗試不使用 ID 參數
-    - name: 🔍 測試不帶 ID 的請求
-      uri:
-        url: "{{ fortigate_api_url }}/api/v2/monitor/system/security-rating"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ fortigate_access_token }}"
-        body_format: form-urlencoded
-        body:
-          report_type: "TopologyReport"
-          vdom: "{{ vdom_name | default('root') }}"
-        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
-        timeout: 30
-        status_code: [200, 400, 404]
-      register: no_id_test
-      failed_when: false
-
-    - name: 📋 顯示不帶ID的結果
-      debug:
-        msg: |
-          🎯 不帶ID的請求: {{ '✅' if no_id_test.status == 200 else '❌' }} ({{ no_id_test.status }})
-          {% if no_id_test.status == 200 %}
-          📊 與帶ID結果相同: {{ '是' if no_id_test.json == security_rating_data.json else '否' }}
-          {% endif %}
-
-    # 提取 Unused Policies 資料
-    - name: 🎯 提取 Unused Policies 資料
-      debug:
-        msg: |
-          ========= 🎯 Unused Policies 資料 =========
+          ========= 🎯 Security Rating Results =========
+          {% if security_rating_data.json.securityRatingResults is defined %}
+          {% for result in security_rating_data.json.securityRatingResults[:3] %}
           
-          {% set found_unused = false %}
-          {% for test_result in [security_rating_data] + report_type_tests.results + [no_id_test] %}
-          {% if test_result.status == 200 and test_result.json is defined %}
-          
-          {% if test_result.json.results is defined %}
-          {% for result in test_result.json.results %}
+          📊 Rating Result {{ loop.index }}:
+          {% if result is mapping %}
+          - Keys: {{ result.keys()|list }}
+          {% if result.device is defined %}
+          - Device: {{ result.device }}
+          {% endif %}
           {% if result.recommendations is defined %}
+          - Recommendations Count: {{ result.recommendations|length }}
+          {% endif %}
+          {% else %}
+          - Value: {{ result }}
+          {% endif %}
+          
+          {% endfor %}
+          {% endif %}
+          ========================================
+
+    - name: 🔍 尋找 Unused Policies 相關資料
+      debug:
+        msg: |
+          ========= 🔍 搜尋 Unused Policies =========
+          
+          {% set found_unused = [] %}
+          
+          {% if security_rating_data.json.results is defined %}
+          {% for result in security_rating_data.json.results %}
+          {% if result is mapping and ('unused' in result|string|lower or 'policy' in result|string|lower) %}
+          {% set _ = found_unused.append(result) %}
+          {% endif %}
+          {% endfor %}
+          {% endif %}
+          
+          {% if security_rating_data.json.securityRatingResults is defined %}
+          {% for result in security_rating_data.json.securityRatingResults %}
+          {% if result is mapping and result.recommendations is defined %}
           {% for rec in result.recommendations %}
-          {% if 'unused' in rec|string|lower or 'policy' in rec|string|lower %}
-          {% set found_unused = true %}
-          
-          🎯 找到 Unused Policy 推薦:
-          {{ rec | to_nice_json }}
-          
+          {% if rec is mapping and ('unused' in rec|string|lower or 'policy' in rec|string|lower) %}
+          {% set _ = found_unused.append(rec) %}
           {% endif %}
           {% endfor %}
           {% endif %}
           {% endfor %}
           {% endif %}
           
-          {% endif %}
-          {% endfor %}
+          {% if found_unused|length > 0 %}
+          🎯 找到 {{ found_unused|length }} 個相關項目:
+          {% for item in found_unused[:3] %}
           
-          {% if not found_unused %}
-          ⚠️ 在API回應中未找到明確的 unused policies 資料
-          💡 可能需要：
-          1. 確認 ID 參數是否正確
-          2. 檢查是否需要先觸發分析
-          3. 嘗試其他 report_type
+          📋 項目 {{ loop.index }}:
+          {{ item | to_nice_json }}
+          
+          {% endfor %}
+          {% else %}
+          ⚠️ 未在明顯位置找到 unused policies 資料
           {% endif %}
-          ==========================================
+          ======================================
 
-    # 生成當前時間戳作為新的ID嘗試
-    - name: 🕐 生成新的時間戳ID測試
-      set_fact:
-        current_timestamp: "{{ ansible_date_time.epoch }}000"  # 轉換為毫秒
-
-    - name: 🔍 使用新時間戳測試
-      uri:
-        url: "{{ fortigate_api_url }}/api/v2/monitor/system/security-rating"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ fortigate_access_token }}"
-        body_format: form-urlencoded
-        body:
-          report_type: "TopologyReport"
-          id: "{{ current_timestamp }}"
-          vdom: "{{ vdom_name | default('root') }}"
-        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
-        timeout: 30
-        status_code: [200, 400, 404]
-      register: new_timestamp_test
-      failed_when: false
-
-    - name: 📊 總結所有測試結果
+    - name: 🏢 分析 Devices 資料 (尋找 Policy 資訊)
       debug:
         msg: |
-          ========= 🎯 Security Rating API 測試總結 =========
+          ========= 🏢 Devices 分析 =========
+          {% if security_rating_data.json.devices is defined %}
           
-          ✅ 原始ID成功: {{ '是' if security_rating_data.status == 200 else '否' }}
-          ✅ 不同report_type成功: {{ report_type_tests.results | selectattr('status', 'equalto', 200) | list | length }}/{{ report_type_tests.results | length }}
-          ✅ 不帶ID成功: {{ '是' if no_id_test.status == 200 else '否' }}  
-          ✅ 新時間戳成功: {{ '是' if new_timestamp_test.status == 200 else '否' }}
+          📊 設備總數: {{ security_rating_data.json.devices|length }}
           
-          🎯 下一步建議:
-          {% if security_rating_data.status == 200 %}
-          1. ✅ API端點有效，檢查回應中的 unused policies 資料
-          2. 🔍 分析 recommendations 或 results 結構
-          3. 📋 確認資料格式並提取所需欄位
-          {% else %}
-          1. ⚠️ 檢查ID參數是否過期
-          2. 🔄 在GUI中重新執行Security Rating分析
-          3. 📱 重新抓取新的API請求
+          {% for device in security_rating_data.json.devices[:2] %}
+          📱 Device {{ loop.index }}:
+          {% if device is mapping %}
+          - Keys: {{ device.keys()|list }}
+          {% if device.serialNumber is defined %}
+          - Serial: {{ device.serialNumber }}
           {% endif %}
-          ===============================================
+          {% if device.deviceName is defined %}
+          - Name: {{ device.deviceName }}
+          {% endif %}
+          {% if device.recommendations is defined %}
+          - Recommendations: {{ device.recommendations|length }}
+          
+          🔍 檢查 Recommendations:
+          {% for rec in device.recommendations[:3] %}
+          {% if rec is mapping and ('unused' in rec|string|lower or 'policy' in rec|string|lower) %}
+          🎯 找到 Policy 相關推薦！
+          {{ rec | to_nice_json }}
+          {% endif %}
+          {% endfor %}
+          {% endif %}
+          {% endif %}
+          
+          {% endfor %}
+          {% endif %}
+          ===============================
+
+    - name: 📝 完整資料結構展示 (關鍵部分)
+      debug:
+        msg: |
+          ========= 📝 完整資料結構 =========
+          
+          🔍 如果上面沒找到 unused policies，請檢查完整結構:
+          
+          📊 所有可能包含 policy 資訊的欄位:
+          {% for key, value in security_rating_data.json.items() %}
+          {% if 'policy' in key|lower or 'recommendation' in key|lower or 'result' in key|lower %}
+          - {{ key }}: {{ value|type_debug }} ({{ value|length if value is iterable and value is not string else 'N/A' }})
+          {% endif %}
+          {% endfor %}
+          
+          💡 建議下一步:
+          1. 檢查 devices[].recommendations 中是否有 unused policies
+          2. 查看 securityRatingResults[].recommendations
+          3. 分析 results[] 陣列中的具體內容
+          ===================================
