@@ -1,14 +1,85 @@
 ---
-- name: FortiGate Security Rating Unused Policies Direct Query
+- name: Deep Dive FortiGate Security Rating Unused Policies
   hosts: localhost
   gather_facts: true
   vars:
     fortigate_api_url: "https://{{ fortigate_host }}:{{ fortigate_api_port | default('443') }}"
 
   tasks:
-    - name: 直接查詢 Security Rating
+    - name: 深入探索 Security Rating
+      debug:
+        msg: "🔍 深入探索 Security Rating 實際資料..."
+
+    # =================== 嘗試不同的 Security Rating 參數 ===================
+    - name: 測試 Security Rating 的不同參數組合
       uri:
         url: "{{ fortigate_api_url }}/api/v2/monitor/system/security-rating"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        body_format: form-urlencoded
+        body: "{{ item.params }}"
+        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
+        timeout: "{{ fortigate_timeout | default('30') | int }}"
+        status_code: [200, 400, 404]
+      register: security_rating_tests
+      loop:
+        - name: "基本查詢"
+          params:
+            vdom: "{{ vdom_name | default('root') }}"
+        - name: "查詢結果"
+          params:
+            vdom: "{{ vdom_name | default('root') }}"
+            action: "get"
+        - name: "查詢資料"
+          params:
+            vdom: "{{ vdom_name | default('root') }}"
+            format: "json"
+        - name: "查詢評分"
+          params:
+            vdom: "{{ vdom_name | default('root') }}"
+            scope: "all"
+        - name: "查詢優化建議"
+          params:
+            vdom: "{{ vdom_name | default('root') }}"
+            category: "optimization"
+        - name: "查詢未使用資源"
+          params:
+            vdom: "{{ vdom_name | default('root') }}"
+            category: "unused"
+        - name: "查詢Policy建議"
+          params:
+            vdom: "{{ vdom_name | default('root') }}"
+            type: "policy"
+        - name: "查詢詳細資料"
+          params:
+            vdom: "{{ vdom_name | default('root') }}"
+            details: "true"
+      failed_when: false
+
+    - name: 顯示 Security Rating 測試結果
+      debug:
+        msg: |
+          ========= {{ item.item.name }} =========
+          參數: {{ item.item.params }}
+          狀態: {{ item.status }}
+          {% if item.status == 200 %}
+          {% if item.json != security_rating_tests.results[0].json %}
+          🎯 發現不同的回應內容!
+          {% endif %}
+          回應大小: {{ item.content | length }} 字元
+          {% if item.json is defined and item.json.results is defined %}
+          結果筆數: {{ item.json.results | length }}
+          {% endif %}
+          {% endif %}
+          ================================
+      loop: "{{ security_rating_tests.results }}"
+      when: item.status == 200
+
+    # =================== 探索其他可能的 Security Rating 端點 ===================
+    - name: 探索其他 Security Rating 相關端點
+      uri:
+        url: "{{ fortigate_api_url }}{{ item }}"
         method: GET
         headers:
           Authorization: "Bearer {{ fortigate_access_token }}"
@@ -16,48 +87,203 @@
         body:
           vdom: "{{ vdom_name | default('root') }}"
         validate_certs: "{{ fortigate_validate_certs | default(false) }}"
-        timeout: "{{ fortigate_timeout | default('60') | int }}"
-      register: security_rating_result
+        timeout: "{{ fortigate_timeout | default('30') | int }}"
+        status_code: [200, 400, 404, 500]
+      register: other_endpoints_test
+      loop:
+        - "/api/v2/monitor/system/security-rating/results"
+        - "/api/v2/monitor/system/security-rating/data"  
+        - "/api/v2/monitor/system/security-rating/score"
+        - "/api/v2/monitor/system/security-rating/recommendations"
+        - "/api/v2/monitor/system/security-rating/unused-policies"
+        - "/api/v2/monitor/system/security-rating/optimization"
+        - "/api/v2/monitor/system/security-rating/assessment"
+        - "/api/v2/monitor/firewall/security-rating"
+        - "/api/v2/monitor/system/csf/security-rating"
+        - "/api/v2/monitor/log/security-rating"
       failed_when: false
 
-    - name: 顯示 Security Rating 原始回應
+    - name: 顯示其他端點測試結果  
       debug:
         msg: |
-          ========= Security Rating API 回應 =========
-          狀態碼: {{ security_rating_result.status }}
-          {% if security_rating_result.status == 200 %}
-          
-          完整回應內容:
-          {{ security_rating_result.json | to_nice_json }}
-          
-          {% elif security_rating_result.status == 400 %}
-          錯誤訊息: {{ security_rating_result.json.error | default('參數錯誤') }}
-          {% elif security_rating_result.status == 404 %}
-          API 端點不存在，可能的原因:
-          - FortiGate 版本不支援
-          - Security Rating 功能未啟用
-          - 需要不同的 API 路徑
+          ========= {{ item.item }} =========
+          狀態: {{ item.status }}
+          {% if item.status == 200 %}
+          ✅ 成功! 回應大小: {{ item.content | length }} 字元
+          {% if item.json is defined %}
+          {% if item.json.results is defined %}
+          結果數量: {{ item.json.results | length }}
+          {% endif %}
+          主要欄位: {{ item.json.keys() | list }}
+          {% endif %}
+          {% elif item.status == 400 %}
+          ⚠️ 端點存在但參數不正確
+          {% elif item.status == 404 %}
+          ❌ 端點不存在
+          {% endif %}
+          ============================
+      loop: "{{ other_endpoints_test.results }}"
+
+    # =================== 嘗試 POST 方法觸發 Security Rating ===================
+    - name: 嘗試觸發 Security Rating 計算
+      uri:
+        url: "{{ fortigate_api_url }}/api/v2/monitor/system/security-rating"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ fortigate_access_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          vdom: "{{ vdom_name | default('root') }}"
+          action: "start"
+        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
+        timeout: "{{ fortigate_timeout | default('30') | int }}"
+        status_code: [200, 400, 404, 405]
+      register: security_rating_trigger
+      failed_when: false
+
+    - name: 顯示觸發結果
+      debug:
+        msg: |
+          ========= Security Rating 觸發測試 =========
+          狀態: {{ security_rating_trigger.status }}
+          {% if security_rating_trigger.status == 200 %}
+          ✅ 成功觸發 Security Rating 計算
+          回應: {{ security_rating_trigger.json | default('無JSON回應') }}
+          {% elif security_rating_trigger.status == 405 %}
+          ℹ️ 不支援 POST 方法
           {% endif %}
           ======================================
 
-    - name: 如果找到 unused policies 資料，進行解析
+    # =================== 探索 CSF (Security Fabric) 相關 ===================
+    - name: 探索 Security Fabric 端點
+      uri:
+        url: "{{ fortigate_api_url }}{{ item }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        body_format: form-urlencoded
+        body:
+          vdom: "{{ vdom_name | default('root') }}"
+        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
+        timeout: "{{ fortigate_timeout | default('30') | int }}"
+        status_code: [200, 400, 404]
+      register: csf_endpoints_test
+      loop:
+        - "/api/v2/monitor/system/csf"
+        - "/api/v2/monitor/system/csf/pending"
+        - "/api/v2/monitor/system/csf/fabric-device"
+        - "/api/v2/cmdb/system/csf"
+      failed_when: false
+
+    # =================== 嘗試查詢系統狀態和功能 ===================
+    - name: 查詢系統功能狀態
+      uri:
+        url: "{{ fortigate_api_url }}{{ item }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        body_format: form-urlencoded
+        body:
+          vdom: "{{ vdom_name | default('root') }}"
+        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
+        timeout: "{{ fortigate_timeout | default('30') | int }}"
+        status_code: [200, 400, 404]
+      register: system_status_test
+      loop:
+        - "/api/v2/monitor/system/status"
+        - "/api/v2/monitor/system/feature-select"
+        - "/api/v2/monitor/license/status"
+        - "/api/v2/monitor/system/feature"
+      failed_when: false
+
+    - name: 檢查系統是否支援 Security Rating
       debug:
         msg: |
-          ========= 找到 Unused Policies 資料! =========
-          {% if security_rating_result.json.results is defined %}
-          {% for item in security_rating_result.json.results %}
-          {% if 'unused' in item.name | default('') | lower or 'policy' in item.name | default('') | lower %}
+          ========= 系統功能檢查 =========
+          {% for result in system_status_test.results %}
+          {% if result.status == 200 %}
           
-          項目: {{ item.name | default('未知') }}
-          數值: {{ item.value | default('N/A') }}
-          描述: {{ item.description | default('無描述') }}
-          {% if item.details is defined %}
-          詳細資料: {{ item.details }}
+          {{ result.item }} 回應:
+          {% if result.json is defined %}
+          {% if 'security' in result.json | string | lower %}
+          🔍 發現 Security 相關功能
+          {% endif %}
+          {% if 'rating' in result.json | string | lower %}
+          🎯 發現 Rating 相關功能  
+          {% endif %}
+          {% if result.json.results is defined %}
+          功能數量: {{ result.json.results | length }}
+          {% endif %}
           {% endif %}
           {% endif %}
           {% endfor %}
+          ============================
+
+    # =================== 嘗試查詢 Policy 相關的優化建議 ===================
+    - name: 探索 Policy 優化相關端點
+      uri:
+        url: "{{ fortigate_api_url }}{{ item }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        body_format: form-urlencoded
+        body:
+          vdom: "{{ vdom_name | default('root') }}"
+        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
+        timeout: "{{ fortigate_timeout | default('30') | int }}"
+        status_code: [200, 400, 404]
+      register: policy_optimization_test
+      loop:
+        - "/api/v2/monitor/firewall/policy-lookup"
+        - "/api/v2/monitor/firewall/policy-match"
+        - "/api/v2/monitor/system/sandbox/stats"
+        - "/api/v2/monitor/firewall/consolidated-policy"
+        - "/api/v2/monitor/log/policy-archive"
+      failed_when: false
+
+    # =================== 顯示所有成功的端點完整資料 ===================
+    - name: 列出所有發現的有用端點
+      set_fact:
+        successful_endpoints: "{{ all_successful }}"
+      vars:
+        all_successful: |
+          [
+          {% for test_group in [security_rating_tests.results, other_endpoints_test.results, csf_endpoints_test.results, system_status_test.results, policy_optimization_test.results] %}
+          {% for result in test_group %}
+          {% if result.status == 200 %}
+          {
+            "endpoint": "{{ result.url | default(result.item) }}",
+            "status": {{ result.status }},
+            "content_length": {{ result.content | length }},
+            "has_results": {{ result.json.results is defined }},
+            "result_count": {{ result.json.results | length if result.json.results is defined else 0 }},
+            "keys": {{ result.json.keys() | list if result.json is defined else [] }}
+          },
           {% endif %}
-          =========================================
-      when: 
-        - security_rating_result.status == 200
-        - security_rating_result.json is defined
+          {% endfor %}
+          {% endfor %}
+          ]
+
+    - name: 總結探索發現
+      debug:
+        msg: |
+          🎯 FortiGate Security Rating 深度探索完成!
+          
+          📊 發現摘要:
+          - 成功訪問的端點: {{ successful_endpoints | length }}
+          - Security Rating 基礎端點可訪問但只返回靜態常數
+          - 需要進一步測試特定參數或觸發機制
+          
+          💡 下一步建議:
+          1. 檢查 FortiGate GUI 中是否已啟用 Security Rating
+          2. 確認是否有相關授權
+          3. 查看 FortiGate 文檔中 Security Rating 的具體 API 用法
+          4. 可能需要先在 GUI 中執行一次 Security Rating 分析
+          
+          🔧 替代方案:
+          如果內建的 Security Rating API 不易取得資料，
+          我們可以繼續使用之前的方法逐一查詢 Policy 使用統計
+          
+          ⚠️ 重要發現:
+          {{ successful_endpoints | selectattr('has_results', 'equalto', true) | list | length }} 個端點有實際資料結構
