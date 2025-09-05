@@ -1,0 +1,63 @@
+---
+- name: FortiGate Security Rating Unused Policies Direct Query
+  hosts: localhost
+  gather_facts: true
+  vars:
+    fortigate_api_url: "https://{{ fortigate_host }}:{{ fortigate_api_port | default('443') }}"
+
+  tasks:
+    - name: 直接查詢 Security Rating
+      uri:
+        url: "{{ fortigate_api_url }}/api/v2/monitor/system/security-rating"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        body_format: form-urlencoded
+        body:
+          vdom: "{{ vdom_name | default('root') }}"
+        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
+        timeout: "{{ fortigate_timeout | default('60') | int }}"
+      register: security_rating_result
+      failed_when: false
+
+    - name: 顯示 Security Rating 原始回應
+      debug:
+        msg: |
+          ========= Security Rating API 回應 =========
+          狀態碼: {{ security_rating_result.status }}
+          {% if security_rating_result.status == 200 %}
+          
+          完整回應內容:
+          {{ security_rating_result.json | to_nice_json }}
+          
+          {% elif security_rating_result.status == 400 %}
+          錯誤訊息: {{ security_rating_result.json.error | default('參數錯誤') }}
+          {% elif security_rating_result.status == 404 %}
+          API 端點不存在，可能的原因:
+          - FortiGate 版本不支援
+          - Security Rating 功能未啟用
+          - 需要不同的 API 路徑
+          {% endif %}
+          ======================================
+
+    - name: 如果找到 unused policies 資料，進行解析
+      debug:
+        msg: |
+          ========= 找到 Unused Policies 資料! =========
+          {% if security_rating_result.json.results is defined %}
+          {% for item in security_rating_result.json.results %}
+          {% if 'unused' in item.name | default('') | lower or 'policy' in item.name | default('') | lower %}
+          
+          項目: {{ item.name | default('未知') }}
+          數值: {{ item.value | default('N/A') }}
+          描述: {{ item.description | default('無描述') }}
+          {% if item.details is defined %}
+          詳細資料: {{ item.details }}
+          {% endif %}
+          {% endif %}
+          {% endfor %}
+          {% endif %}
+          =========================================
+      when: 
+        - security_rating_result.status == 200
+        - security_rating_result.json is defined
