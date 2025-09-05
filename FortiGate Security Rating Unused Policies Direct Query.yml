@@ -1,133 +1,201 @@
 ---
-- name: Simplified FortiGate Security Analysis
+- name: Extract FortiGate Security Rating Unused Policies Data
   hosts: localhost
   gather_facts: false
   vars:
     fortigate_api_url: "https://{{ fortigate_host }}:{{ fortigate_api_port | default('443') }}"
 
   tasks:
-    - name: 🔍 測試 CSF 端點
+    - name: 🎯 測試發現的 Security Rating API
       uri:
-        url: "{{ fortigate_api_url }}/api/v2/monitor/system/csf"
+        url: "{{ fortigate_api_url }}/api/v2/monitor/system/security-rating"
         method: GET
         headers:
           Authorization: "Bearer {{ fortigate_access_token }}"
         body_format: form-urlencoded
         body:
+          report_type: "TopologyReport"
+          id: "{{ security_rating_id | default('1757052908321') }}"
           vdom: "{{ vdom_name | default('root') }}"
-          action: "{{ item }}"
         validate_certs: "{{ fortigate_validate_certs | default(false) }}"
         timeout: 30
-      register: csf_results
-      loop:
-        - "get-security-rating"
-        - "get-unused-policies" 
-        - "security-rating"
-        - "unused-policy"
+      register: security_rating_data
 
-    - name: 📋 簡潔顯示 CSF 結果
+    - name: 📋 顯示 Security Rating 回應結構
       debug:
         msg: |
-          🎯 Action: {{ item.item }}
-          ✅ Status: {{ item.status }}
-          📊 Has Results: {{ 'Yes (' + (item.json.results|length|string) + ')' if item.json.results is defined and item.json.results|length > 0 else 'No' }}
-          🔑 Keys: {{ item.json.keys()|list|join(', ') if item.json is defined else 'None' }}
-      loop: "{{ csf_results.results }}"
-      when: item.status == 200
+          🎯 Security Rating API 結果:
+          ✅ Status: {{ security_rating_data.status }}
+          📊 Response Keys: {{ security_rating_data.json.keys()|list if security_rating_data.json is defined else 'No JSON' }}
+          
+          {% if security_rating_data.json.results is defined %}
+          📈 Results Count: {{ security_rating_data.json.results|length }}
+          {% endif %}
+      when: security_rating_data.status == 200
 
-    # 只顯示有實際資料的內容
-    - name: 🎯 顯示有資料的回應
+    - name: 🔍 分析 Security Rating 資料結構
       debug:
         msg: |
-          ========= {{ item.item }} 的資料 =========
-          {% if item.json.results is defined and item.json.results|length > 0 %}
-          📋 找到 {{ item.json.results|length }} 筆資料
+          ========= 🔍 Security Rating 資料分析 =========
           
-          🔍 第一筆資料的欄位:
-          {{ item.json.results[0].keys()|list|join(', ') }}
+          {% if security_rating_data.json.results is defined %}
+          📊 找到 {{ security_rating_data.json.results|length }} 筆結果
           
-          📊 範例資料:
-          {% for key, value in item.json.results[0].items() %}
-          - {{ key }}: {{ value }}
+          {% for result in security_rating_data.json.results %}
+          
+          📋 結果 {{ loop.index }}:
+          - Keys: {{ result.keys()|list }}
+          {% if result.recommendations is defined %}
+          - 推薦項目數: {{ result.recommendations|length }}
+          {% endif %}
+          {% if result.unused_policies is defined %}
+          🎯 找到 Unused Policies！
+          {% endif %}
+          
           {% endfor %}
           {% else %}
-          📋 回應內容:
-          {% for key, value in item.json.items() %}
-          - {{ key }}: {{ value }}
-          {% endfor %}
+          📋 完整回應內容:
+          {{ security_rating_data.json | to_nice_json }}
           {% endif %}
-          =====================================
-      loop: "{{ csf_results.results }}"
-      when: 
-        - item.status == 200
-        - item.json is defined
-        - (item.json.results is defined and item.json.results|length > 0) or (item.json.keys()|list|length > 0)
+          =============================================
+      when: security_rating_data.status == 200
 
-    # 測試直接的 policy 統計端點
-    - name: 🎯 測試 Policy 統計端點
+    # 嘗試不同的 report_type
+    - name: 🔍 測試不同的 Report Type
       uri:
-        url: "{{ fortigate_api_url }}/api/v2/monitor/firewall/policy"
+        url: "{{ fortigate_api_url }}/api/v2/monitor/system/security-rating"
         method: GET
         headers:
           Authorization: "Bearer {{ fortigate_access_token }}"
-        body_format: form-urlencoded  
+        body_format: form-urlencoded
         body:
+          report_type: "{{ item }}"
+          id: "{{ security_rating_id | default('1757052908321') }}"
           vdom: "{{ vdom_name | default('root') }}"
         validate_certs: "{{ fortigate_validate_certs | default(false) }}"
         timeout: 30
         status_code: [200, 400, 404]
-      register: policy_stats
+      register: report_type_tests
+      loop:
+        - "SecurityReport"
+        - "PolicyReport"
+        - "UnusedPolicyReport"
+        - "ComplianceReport"
+        - "RecommendationReport"
       failed_when: false
 
-    - name: 📊 Policy 統計結果
+    - name: 📊 顯示不同 Report Type 結果
       debug:
         msg: |
-          🎯 Policy Monitor API: {{ '✅' if policy_stats.status == 200 else '❌' }} ({{ policy_stats.status }})
-          {% if policy_stats.status == 200 and policy_stats.json.results is defined %}
-          📋 找到 {{ policy_stats.json.results|length }} 條 policies
-          
-          🔍 Policy 欄位:
-          {{ policy_stats.json.results[0].keys()|list|join(', ') if policy_stats.json.results|length > 0 else 'No policies' }}
-          
-          📊 有 bytes/packets 的 policies:
-          {% set policies_with_stats = policy_stats.json.results | selectattr('bytes', 'defined') | list %}
-          {{ policies_with_stats|length }} / {{ policy_stats.json.results|length }}
-          
-          {% if policies_with_stats|length > 0 %}
-          🔍 範例 (有流量統計):
-          {% for policy in policies_with_stats[:2] %}
-          - Policy: {{ policy.name | default('N/A') }} | Bytes: {{ policy.bytes | default(0) }} | Packets: {{ policy.packets | default(0) }}
-          {% endfor %}
+          🎯 {{ item.item }}: {{ '✅' if item.status == 200 else '❌' }} ({{ item.status }})
+          {% if item.status == 200 and item.json.results is defined %}
+          📈 Results: {{ item.json.results|length }}
           {% endif %}
-          {% endif %}
-      when: policy_stats.status == 200
+      loop: "{{ report_type_tests.results }}"
 
-    # 總結發現
-    - name: 🎯 總結發現
+    # 嘗試不使用 ID 參數
+    - name: 🔍 測試不帶 ID 的請求
+      uri:
+        url: "{{ fortigate_api_url }}/api/v2/monitor/system/security-rating"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        body_format: form-urlencoded
+        body:
+          report_type: "TopologyReport"
+          vdom: "{{ vdom_name | default('root') }}"
+        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
+        timeout: 30
+        status_code: [200, 400, 404]
+      register: no_id_test
+      failed_when: false
+
+    - name: 📋 顯示不帶ID的結果
       debug:
         msg: |
-          ========= 🎯 分析總結 =========
+          🎯 不帶ID的請求: {{ '✅' if no_id_test.status == 200 else '❌' }} ({{ no_id_test.status }})
+          {% if no_id_test.status == 200 %}
+          📊 與帶ID結果相同: {{ '是' if no_id_test.json == security_rating_data.json else '否' }}
+          {% endif %}
+
+    # 提取 Unused Policies 資料
+    - name: 🎯 提取 Unused Policies 資料
+      debug:
+        msg: |
+          ========= 🎯 Unused Policies 資料 =========
           
-          ✅ CSF 成功端點: {{ csf_results.results | selectattr('status', 'equalto', 200) | list | length }}/4
-          ✅ Policy API: {{ '成功' if policy_stats.status == 200 else '失敗' }}
+          {% set found_unused = false %}
+          {% for test_result in [security_rating_data] + report_type_tests.results + [no_id_test] %}
+          {% if test_result.status == 200 and test_result.json is defined %}
           
-          📊 發現的資料:
-          {% set found_data = false %}
-          {% for item in csf_results.results %}
-          {% if item.status == 200 and item.json.results is defined and item.json.results|length > 0 %}
-          {% set found_data = true %}
-          - {{ item.item }}: {{ item.json.results|length }} 筆
+          {% if test_result.json.results is defined %}
+          {% for result in test_result.json.results %}
+          {% if result.recommendations is defined %}
+          {% for rec in result.recommendations %}
+          {% if 'unused' in rec|string|lower or 'policy' in rec|string|lower %}
+          {% set found_unused = true %}
+          
+          🎯 找到 Unused Policy 推薦:
+          {{ rec | to_nice_json }}
+          
           {% endif %}
           {% endfor %}
-          {% if policy_stats.status == 200 and policy_stats.json.results is defined %}
-          {% set found_data = true %}
-          - Policy Monitor: {{ policy_stats.json.results|length }} 筆
+          {% endif %}
+          {% endfor %}
           {% endif %}
           
-          💡 下一步建議:
-          {% if found_data %}
-          ✅ 找到資料，可以進一步分析是否包含 unused policy 資訊
-          {% else %}
-          ⚠️ 需要在 FortiGate GUI 中先執行 Security Rating 分析
           {% endif %}
-          ==============================
+          {% endfor %}
+          
+          {% if not found_unused %}
+          ⚠️ 在API回應中未找到明確的 unused policies 資料
+          💡 可能需要：
+          1. 確認 ID 參數是否正確
+          2. 檢查是否需要先觸發分析
+          3. 嘗試其他 report_type
+          {% endif %}
+          ==========================================
+
+    # 生成當前時間戳作為新的ID嘗試
+    - name: 🕐 生成新的時間戳ID測試
+      set_fact:
+        current_timestamp: "{{ ansible_date_time.epoch }}000"  # 轉換為毫秒
+
+    - name: 🔍 使用新時間戳測試
+      uri:
+        url: "{{ fortigate_api_url }}/api/v2/monitor/system/security-rating"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ fortigate_access_token }}"
+        body_format: form-urlencoded
+        body:
+          report_type: "TopologyReport"
+          id: "{{ current_timestamp }}"
+          vdom: "{{ vdom_name | default('root') }}"
+        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
+        timeout: 30
+        status_code: [200, 400, 404]
+      register: new_timestamp_test
+      failed_when: false
+
+    - name: 📊 總結所有測試結果
+      debug:
+        msg: |
+          ========= 🎯 Security Rating API 測試總結 =========
+          
+          ✅ 原始ID成功: {{ '是' if security_rating_data.status == 200 else '否' }}
+          ✅ 不同report_type成功: {{ report_type_tests.results | selectattr('status', 'equalto', 200) | list | length }}/{{ report_type_tests.results | length }}
+          ✅ 不帶ID成功: {{ '是' if no_id_test.status == 200 else '否' }}  
+          ✅ 新時間戳成功: {{ '是' if new_timestamp_test.status == 200 else '否' }}
+          
+          🎯 下一步建議:
+          {% if security_rating_data.status == 200 %}
+          1. ✅ API端點有效，檢查回應中的 unused policies 資料
+          2. 🔍 分析 recommendations 或 results 結構
+          3. 📋 確認資料格式並提取所需欄位
+          {% else %}
+          1. ⚠️ 檢查ID參數是否過期
+          2. 🔄 在GUI中重新執行Security Rating分析
+          3. 📱 重新抓取新的API請求
+          {% endif %}
+          ===============================================
