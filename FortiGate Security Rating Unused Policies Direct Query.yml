@@ -1,50 +1,12 @@
 ---
-- name: Collect FortiGate Security Rating Unused Policies
+- name: Deep Analysis FortiGate Security Rating API
   hosts: localhost
   gather_facts: false
   vars:
     fortigate_api_url: "https://{{ fortigate_host }}:{{ fortigate_api_port | default('443') }}"
 
   tasks:
-    - name: 收集 Security Rating 資訊
-      debug:
-        msg: "🔍 嘗試收集 Security Rating Unused Policies 資料"
-
-    # 嘗試最有可能的幾個端點
-    - name: 測試 Security Rating 端點
-      uri:
-        url: "{{ fortigate_api_url }}{{ item }}"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ fortigate_access_token }}"
-        body_format: form-urlencoded
-        body:
-          vdom: "{{ vdom_name | default('root') }}"
-        validate_certs: "{{ fortigate_validate_certs | default(false) }}"
-        timeout: 30
-        status_code: [200, 400, 404]
-      register: endpoint_tests
-      loop:
-        - "/api/v2/monitor/system/security-rating"
-        - "/api/v2/monitor/system/security-rating/results" 
-        - "/api/v2/monitor/system/csf/security-rating"
-        - "/api/v2/monitor/system/csf"
-      failed_when: false
-
-    # 顯示簡潔結果
-    - name: 顯示端點測試結果
-      debug:
-        msg: |
-          {{ item.item }}: {{ '✅' if item.status == 200 else '❌' }} ({{ item.status }})
-          {% if item.status == 200 and item.json.results is defined %}
-          - 有results資料: {{ item.json.results | length }} 筆
-          {% elif item.status == 200 %}
-          - 回應欄位: {{ item.json.keys() | list }}
-          {% endif %}
-      loop: "{{ endpoint_tests.results }}"
-
-    # 嘗試CSF相關的unused policies查詢
-    - name: 測試 CSF Unused Policies 查詢
+    - name: 🔍 深度分析成功的 CSF 端點
       uri:
         url: "{{ fortigate_api_url }}/api/v2/monitor/system/csf"
         method: GET
@@ -56,87 +18,97 @@
           action: "{{ item }}"
         validate_certs: "{{ fortigate_validate_certs | default(false) }}"
         timeout: 30
-        status_code: [200, 400, 404]
-      register: csf_action_tests
+      register: csf_detailed
       loop:
         - "get-security-rating"
         - "get-unused-policies" 
         - "security-rating"
         - "unused-policy"
-      failed_when: false
 
-    - name: 顯示 CSF 查詢結果
+    - name: 📊 分析 CSF 回應結構
       debug:
         msg: |
-          CSF Action "{{ item.item }}": {{ '✅' if item.status == 200 else '❌' }} ({{ item.status }})
-          {% if item.status == 200 and item.json != endpoint_tests.results[0].json %}
-          🎯 發現不同的回應!
+          ========= CSF Action: {{ item.item }} =========
+          Status: {{ item.status }}
+          Response Keys: {{ item.json.keys() | list if item.json is defined else 'No JSON' }}
+          
+          {% if item.json.results is defined %}
+          📋 Results 結構:
+          - Count: {{ item.json.results | length }}
+          - Sample Keys: {{ item.json.results[0].keys() | list if item.json.results | length > 0 else 'Empty' }}
           {% endif %}
-      loop: "{{ csf_action_tests.results }}"
+          
+          {% if item.json.status is defined %}
+          📋 Status: {{ item.json.status }}
+          {% endif %}
+          
+          {% if item.json.message is defined %}
+          📋 Message: {{ item.json.message }}
+          {% endif %}
+          
+          🔍 完整回應: {{ item.json | to_nice_json }}
+          ==========================================
+      loop: "{{ csf_detailed.results }}"
+      when: item.status == 200
 
-    # 嘗試POST方法觸發或取得結果
-    - name: 嘗試取得 Security Rating 結果
+    # 嘗試 Policy 相關的直接查詢
+    - name: 🎯 測試直接 Policy 端點
       uri:
-        url: "{{ fortigate_api_url }}/api/v2/monitor/system/security-rating"
-        method: POST
+        url: "{{ fortigate_api_url }}{{ item }}"
+        method: GET
         headers:
           Authorization: "Bearer {{ fortigate_access_token }}"
-          Content-Type: "application/json"
-        body_format: json
+        body_format: form-urlencoded
         body:
           vdom: "{{ vdom_name | default('root') }}"
-          action: "get-results"
         validate_certs: "{{ fortigate_validate_certs | default(false) }}"
         timeout: 30
-        status_code: [200, 400, 404, 405]
-      register: post_test
+        status_code: [200, 400, 404]
+      register: policy_tests
+      loop:
+        - "/api/v2/monitor/firewall/policy"
+        - "/api/v2/monitor/firewall/policy/usage"
+        - "/api/v2/monitor/system/policy-statistics"
+        - "/api/v2/cmdb/firewall/policy"
       failed_when: false
 
-    - name: 顯示 POST 測試結果
+    - name: 📈 顯示 Policy 端點結果
       debug:
         msg: |
-          POST Security Rating: {{ '✅' if post_test.status == 200 else '❌' }} ({{ post_test.status }})
-          {% if post_test.status == 200 %}
-          🎯 POST 成功! 可能找到了正確方法
+          {{ item.item }}: {{ '✅' if item.status == 200 else '❌' }} ({{ item.status }})
+          {% if item.status == 200 and item.json.results is defined %}
+          - Results: {{ item.json.results | length }} policies
+          {% elif item.status == 200 %}
+          - Keys: {{ item.json.keys() | list }}
           {% endif %}
+      loop: "{{ policy_tests.results }}"
 
-    # 顯示任何有實際資料的回應
-    - name: 顯示有資料的回應內容
+    # 如果找到policy資料，分析usage資訊
+    - name: 🔍 分析 Policy Usage 資料
       debug:
         msg: |
-          ========= 發現資料: {{ item.url | default(item.item) }} =========
-          {{ item.json | to_nice_json }}
-          =============================================
-      loop: "{{ endpoint_tests.results + csf_action_tests.results + [post_test] }}"
-      when: 
-        - item.status == 200
-        - item.json is defined
-        - item.json | length > 5
-        - "'STATIC' not in (item.json | string)"
-
-    # 總結發現
-    - name: 總結收集結果
-      debug:
-        msg: |
-          🎯 Security Rating 資訊收集完成
+          ========= Policy Usage Analysis =========
+          {% set policies_found = false %}
+          {% for test in policy_tests.results %}
+          {% if test.status == 200 and test.json.results is defined %}
+          {% set policies_found = true %}
+          📋 從 {{ test.item }} 找到 {{ test.json.results | length }} 條 policies
           
-          📊 測試結果:
-          - GET 端點成功: {{ endpoint_tests.results | selectattr('status', 'equalto', 200) | list | length }}/{{ endpoint_tests.results | length }}
-          - CSF Action成功: {{ csf_action_tests.results | selectattr('status', 'equalto', 200) | list | length }}/{{ csf_action_tests.results | length }}
-          - POST 測試: {{ '成功' if post_test.status == 200 else '失敗' }}
-          
-          💡 下一步:
-          {% set has_data = false %}
-          {% for item in endpoint_tests.results + csf_action_tests.results + [post_test] %}
-          {% if item.status == 200 and item.json is defined and item.json | length > 5 and 'STATIC' not in (item.json | string) %}
-          {% set has_data = true %}
+          {% for policy in test.json.results[:3] %}
+          Policy {{ policy.policyid | default('N/A') }}:
+          - Name: {{ policy.name | default('N/A') }}
+          - Last Used: {{ policy.last_used | default('Never') }}
+          - Bytes: {{ policy.bytes | default(0) }}
+          - Packets: {{ policy.packets | default(0) }}
+          {% endfor %}
+          {% if test.json.results | length > 3 %}
+          ... (showing first 3 of {{ test.json.results | length }})
+          {% endif %}
           {% endif %}
           {% endfor %}
-          {% if has_data %}
-          - ✅ 找到有實際資料的端點，可以進一步分析
-          {% else %}
-          - ⚠️ 尚未找到unused policies資料，可能需要：
-            1. 在GUI中先執行Security Rating分析  
-            2. 檢查是否有相關授權
-            3. 嘗試其他API路徑
+          
+          {% if not policies_found %}
+          ⚠️ 尚未在直接 policy 端點找到 usage 資料
           {% endif %}
+          ==========================================
+      when: policy_tests.results | selectattr('status', 'equalto', 200) | list | length > 0
