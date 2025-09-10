@@ -629,6 +629,11 @@
           {% if backup_info.timestamp is defined %}
           備份時間: {{ backup_info.timestamp }}
           {% endif %}
+          {% if backup_info.ip_range is defined %}
+          自定義IP範圍: {{ backup_info.ip_range.start }} - {{ backup_info.ip_range.end }}
+          網段前綴: {{ backup_info.ip_range.network_prefix }}
+          API原始範圍: {{ backup_info.ip_range.api_original_start }} - {{ backup_info.ip_range.api_original_end }}
+          {% endif %}
           執行模式: 三階段整合自動化
           版本: v2.1
 
