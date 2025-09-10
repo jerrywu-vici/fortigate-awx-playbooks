@@ -53,7 +53,10 @@
     # ==================== 參數驗證區塊 ====================
     - name: "🔍 Validate FortiGate Credentials"
       ansible.builtin.fail:
-        msg: "❌ 缺少FortiGate Credential參數: {{ missing_params | join(', ') }}\n\n請確認Job Template已正確設定FortiGate Credential"
+        msg: |
+          ❌ 缺少FortiGate Credential參數: {{ missing_params | join(', ') }}
+          
+          請確認Job Template已正確設定FortiGate Credential
       vars:
         required_params:
           - fortigate_host
@@ -65,7 +68,10 @@
 
     - name: "🔍 Validate Survey Parameters"
       ansible.builtin.fail:
-        msg: "❌ 缺少Survey參數: {{ missing_survey_params | join(', ') }}\n\n請確認已正確填寫所有必要參數"
+        msg: |
+          ❌ 缺少Survey參數: {{ missing_survey_params | join(', ') }}
+          
+          請確認已正確填寫所有必要參數
       vars:
         required_survey_params:
           - ip_param
@@ -81,7 +87,11 @@
 
     - name: "🔍 Validate Server ID"
       ansible.builtin.fail:
-        msg: "❌ 不支援的DHCP Server ID: {{ target_dhcp_server_id }}\n\n支援的ID: {{ server_mapping.keys() | list | join(', ') }}\n請選擇正確的Server ID"
+        msg: |
+          ❌ 不支援的DHCP Server ID: {{ target_dhcp_server_id }}
+          
+          支援的ID: {{ server_mapping.keys() | list | join(', ') }}
+          請選擇正確的Server ID
       when: target_dhcp_server_id not in server_mapping
 
     # ==================== 初始設定區塊 ====================
@@ -97,7 +107,10 @@
 
     - name: "❌ IP Address Format Error"
       ansible.builtin.fail:
-        msg: "❌ IP地址格式錯誤: {{ target_ip }}\n\n請使用正確的IPv4格式，例如：192.168.1.100"
+        msg: |
+          ❌ IP地址格式錯誤: {{ target_ip }}
+          
+          請使用正確的IPv4格式，例如：192.168.1.100
       when: not ip_valid
 
     - name: "🔍 Validate MAC Address Format"
@@ -106,7 +119,11 @@
 
     - name: "❌ MAC Address Format Error"
       ansible.builtin.fail:
-        msg: "❌ MAC地址格式錯誤: {{ target_mac }}\n\n正確格式: xx:xx:xx:xx:xx:xx 或 xx-xx-xx-xx-xx-xx\n範例: 00:11:22:33:44:55"
+        msg: |
+          ❌ MAC地址格式錯誤: {{ target_mac }}
+          
+          正確格式: xx:xx:xx:xx:xx:xx 或 xx-xx-xx-xx-xx-xx
+          範例: 00:11:22:33:44:55
       when: not mac_valid
 
     - name: "🔧 Normalize MAC Address Format"
@@ -165,7 +182,19 @@
 
     - name: "❌ IP Out of Range Error"
       ansible.builtin.fail:
-        msg: "❌ IP地址超出DHCP Server自定義範圍！\n\n詳情：\n- 目標IP: {{ target_ip }}\n- DHCP Server ID: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }})\n- 自定義允許範圍: {{ ip_range_start }} - {{ ip_range_end }}\n- 網段前綴: {{ ip_network_prefix }} (從API讀取)\n- API原始範圍: {{ api_ip_range_start }} - {{ api_ip_range_end }}\n\n解決方案：\n1. 選擇自定義範圍內的IP地址\n2. 或者選擇正確的DHCP Server ID"
+        msg: |
+          ❌ IP地址超出DHCP Server自定義範圍！
+          
+          詳情：
+          - 目標IP: {{ target_ip }}
+          - DHCP Server ID: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }})
+          - 自定義允許範圍: {{ ip_range_start }} - {{ ip_range_end }}
+          - 網段前綴: {{ ip_network_prefix }} (從API讀取)
+          - API原始範圍: {{ api_ip_range_start }} - {{ api_ip_range_end }}
+          
+          解決方案：
+          1. 選擇自定義範圍內的IP地址
+          2. 或者選擇正確的DHCP Server ID
       when: not ip_in_range
 
     # ==================== 預覽資訊顯示 ====================
@@ -173,53 +202,23 @@
       ansible.builtin.debug:
         msg: "==================== FortiGate DHCP Reserved Create&Update Preview v2.1 ===================="
 
-    - name: "📋 Display Three-Stage Preview Parameters"
+    - name: "📋 Three-Stage Preview Parameters Summary"
       ansible.builtin.debug:
-        msg: "🔍 三階段整合預覽模式 v2.1"
-
-    - name: "📋 Display Input Parameters"
-      ansible.builtin.debug:
-        msg: "輸入參數:"
-
-    - name: "📋 Display Target IP"
-      ansible.builtin.debug:
-        msg: "- 目標IP: {{ target_ip }}"
-
-    - name: "📋 Display Target MAC"
-      ansible.builtin.debug:
-        msg: "- 目標MAC: {{ normalized_mac }}"
-
-    - name: "📋 Display Description"
-      ansible.builtin.debug:
-        msg: "- 描述: {{ target_description }}"
-
-    - name: "📋 Display DHCP Server Info"
-      ansible.builtin.debug:
-        msg: "- DHCP Server: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }})"
-
-    - name: "📋 Display Custom IP Range"
-      ansible.builtin.debug:
-        msg: "- 自定義IP範圍: {{ ip_range_start }}-{{ ip_range_end }}"
-
-    - name: "📋 Display API Original Range"
-      ansible.builtin.debug:
-        msg: "- API原始範圍: {{ api_ip_range_start }}-{{ api_ip_range_end }}"
-
-    - name: "📋 Display Three Stage Operations"
-      ansible.builtin.debug:
-        msg: "三階段操作:"
-
-    - name: "📋 Display Stage 1"
-      ansible.builtin.debug:
-        msg: "- 階段1: DHCP Reserved Address"
-
-    - name: "📋 Display Stage 2"
-      ansible.builtin.debug:
-        msg: "- 階段2: Firewall Address Object ({{ target_address_name }})"
-
-    - name: "📋 Display Stage 3"
-      ansible.builtin.debug:
-        msg: "- 階段3: Address Group Member ({{ target_address_group }})"
+        msg: |
+          🔍 三階段整合預覽模式 v2.1
+          
+          輸入參數:
+          - 目標IP: {{ target_ip }}
+          - 目標MAC: {{ normalized_mac }}
+          - 描述: {{ target_description }}
+          - DHCP Server: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }})
+          - 自定義IP範圍: {{ ip_range_start }}-{{ ip_range_end }}
+          - API原始範圍: {{ api_ip_range_start }}-{{ api_ip_range_end }}
+          
+          三階段操作:
+          - 階段1: DHCP Reserved Address
+          - 階段2: Firewall Address Object ({{ target_address_name }})
+          - 階段3: Address Group Member ({{ target_address_group }})
 
     # ==================== 階段1: DHCP 配置分析區塊 ====================
     - name: "📊 Stage 1: DHCP Configuration Analysis Section Header"
@@ -255,7 +254,18 @@
 
     - name: "❌ MAC Conflict Detected"
       ansible.builtin.fail:
-        msg: "❌ 階段1: MAC衝突檢測失敗！\n\n衝突詳情：\n- 目標MAC: {{ normalized_mac }}\n- 目標IP: {{ target_ip }}\n- 衝突原因: MAC {{ normalized_mac }} 已被分配給 IP {{ mac_conflict_object.ip }}\n- 既有配置: ID {{ mac_conflict_object.id }}, 描述: {{ mac_conflict_object.description | default('無') }}\n\n解決方案：\n1. 使用不同的MAC地址\n2. 或者修改目標IP為 {{ mac_conflict_object.ip }}"
+        msg: |
+          ❌ 階段1: MAC衝突檢測失敗！
+          
+          衝突詳情：
+          - 目標MAC: {{ normalized_mac }}
+          - 目標IP: {{ target_ip }}
+          - 衝突原因: MAC {{ normalized_mac }} 已被分配給 IP {{ mac_conflict_object.ip }}
+          - 既有配置: ID {{ mac_conflict_object.id }}, 描述: {{ mac_conflict_object.description | default('無') }}
+          
+          解決方案：
+          1. 使用不同的MAC地址
+          2. 或者修改目標IP為 {{ mac_conflict_object.ip }}
       when: 
         - mac_conflict_object is defined 
         - mac_conflict_object.ip != target_ip
@@ -364,218 +374,90 @@
       ansible.builtin.debug:
         msg: "==================== 三階段配置變更預覽 ===================="
 
-    - name: "📊 Display Stage 1 Analysis Header"
+    - name: "📊 Stage 1: DHCP Operation Analysis"
       ansible.builtin.debug:
-        msg: "📊 階段1: DHCP 操作分析"
+        msg: |
+          📊 階段1: DHCP 操作分析
+          
+          操作類型: {{ dhcp_operation_type }}
+          需要執行: {{ '是' if dhcp_needs_operation else '否' }}
+          檢查配置數: {{ existing_reservations.json.results | length }}
+          {% if dhcp_existing_object | length > 0 %}
+          
+          當前配置:
+          - ID: {{ dhcp_existing_object.id }}
+          - IP: {{ dhcp_existing_object.ip }}
+          - MAC: {{ dhcp_existing_object.mac }}
+          - 描述: {{ dhcp_existing_object.description | default('空白') }}
+          {% endif %}
+          {% if dhcp_needs_operation %}
+          
+          {{ dhcp_operation_type }}後預覽:
+          - IP: {{ target_ip }}
+          - MAC: {{ normalized_mac }}
+          - 描述: {{ target_description }}
+          {% endif %}
 
-    - name: "📊 Display Stage 1 Operation Type"
+    - name: "📊 Stage 2: Address Object Operation Analysis"
       ansible.builtin.debug:
-        msg: "操作類型: {{ dhcp_operation_type }}"
+        msg: |
+          📊 階段2: Address Object 操作分析
+          
+          Address Name: {{ target_address_name }}
+          操作類型: {{ address_operation_type }}
+          需要執行: {{ '是' if address_needs_operation else '否' }}
+          {% if address_exists %}
+          
+          當前配置:
+          - Name: {{ address_existing_object.name }}
+          - Type: {{ address_existing_object.type }}
+          - Comment: {{ address_existing_object.comment }}  
+          - MAC: {{ address_existing_object.macaddr[0].macaddr if address_existing_object.macaddr is defined else '未知' }}
+          {% endif %}
+          {% if address_needs_operation %}
+          
+          {{ address_operation_type }}後預覽:
+          - Name: {{ target_address_name }}
+          - Type: mac
+          - Comment: {{ target_ip }}
+          - MAC: {{ normalized_mac }}
+          {% endif %}
 
-    - name: "📊 Display Stage 1 Needs Operation"
+    - name: "📊 Stage 3: Address Group Operation Analysis"
       ansible.builtin.debug:
-        msg: "需要執行: {{ '是' if dhcp_needs_operation else '否' }}"
-
-    - name: "📊 Display Stage 1 Config Count"
-      ansible.builtin.debug:
-        msg: "檢查配置數: {{ existing_reservations.json.results | length }}"
-
-    - name: "📊 Display Stage 1 Current Config Header"
-      ansible.builtin.debug:
-        msg: "當前配置:"
-      when: dhcp_existing_object | length > 0
-
-    - name: "📊 Display Stage 1 Current Config ID"
-      ansible.builtin.debug:
-        msg: "- ID: {{ dhcp_existing_object.id }}"
-      when: dhcp_existing_object | length > 0
-
-    - name: "📊 Display Stage 1 Current Config IP"
-      ansible.builtin.debug:
-        msg: "- IP: {{ dhcp_existing_object.ip }}"
-      when: dhcp_existing_object | length > 0
-
-    - name: "📊 Display Stage 1 Current Config MAC"
-      ansible.builtin.debug:
-        msg: "- MAC: {{ dhcp_existing_object.mac }}"
-      when: dhcp_existing_object | length > 0
-
-    - name: "📊 Display Stage 1 Current Config Description"
-      ansible.builtin.debug:
-        msg: "- 描述: {{ dhcp_existing_object.description | default('空白') }}"
-      when: dhcp_existing_object | length > 0
-
-    - name: "📊 Display Stage 1 Preview Header"
-      ansible.builtin.debug:
-        msg: "{{ dhcp_operation_type }}後預覽:"
-      when: dhcp_needs_operation
-
-    - name: "📊 Display Stage 1 Preview IP"
-      ansible.builtin.debug:
-        msg: "- IP: {{ target_ip }}"
-      when: dhcp_needs_operation
-
-    - name: "📊 Display Stage 1 Preview MAC"
-      ansible.builtin.debug:
-        msg: "- MAC: {{ normalized_mac }}"
-      when: dhcp_needs_operation
-
-    - name: "📊 Display Stage 1 Preview Description"
-      ansible.builtin.debug:
-        msg: "- 描述: {{ target_description }}"
-      when: dhcp_needs_operation
-
-    - name: "📊 Display Stage 2 Analysis Header"
-      ansible.builtin.debug:
-        msg: "📊 階段2: Address Object 操作分析"
-
-    - name: "📊 Display Stage 2 Address Name"
-      ansible.builtin.debug:
-        msg: "Address Name: {{ target_address_name }}"
-
-    - name: "📊 Display Stage 2 Operation Type"
-      ansible.builtin.debug:
-        msg: "操作類型: {{ address_operation_type }}"
-
-    - name: "📊 Display Stage 2 Needs Operation"
-      ansible.builtin.debug:
-        msg: "需要執行: {{ '是' if address_needs_operation else '否' }}"
-
-    - name: "📊 Display Stage 2 Current Config Header"
-      ansible.builtin.debug:
-        msg: "當前配置:"
-      when: address_exists
-
-    - name: "📊 Display Stage 2 Current Config Name"
-      ansible.builtin.debug:
-        msg: "- Name: {{ address_existing_object.name }}"
-      when: address_exists
-
-    - name: "📊 Display Stage 2 Current Config Type"
-      ansible.builtin.debug:
-        msg: "- Type: {{ address_existing_object.type }}"
-      when: address_exists
-
-    - name: "📊 Display Stage 2 Current Config Comment"
-      ansible.builtin.debug:
-        msg: "- Comment: {{ address_existing_object.comment }}"
-      when: address_exists
-
-    - name: "📊 Display Stage 2 Current Config MAC"
-      ansible.builtin.debug:
-        msg: "- MAC: {{ address_existing_object.macaddr[0].macaddr if address_existing_object.macaddr is defined else '未知' }}"
-      when: address_exists
-
-    - name: "📊 Display Stage 2 Preview Header"
-      ansible.builtin.debug:
-        msg: "{{ address_operation_type }}後預覽:"
-      when: address_needs_operation
-
-    - name: "📊 Display Stage 2 Preview Name"
-      ansible.builtin.debug:
-        msg: "- Name: {{ target_address_name }}"
-      when: address_needs_operation
-
-    - name: "📊 Display Stage 2 Preview Type"
-      ansible.builtin.debug:
-        msg: "- Type: mac"
-      when: address_needs_operation
-
-    - name: "📊 Display Stage 2 Preview Comment"
-      ansible.builtin.debug:
-        msg: "- Comment: {{ target_ip }}"
-      when: address_needs_operation
-
-    - name: "📊 Display Stage 2 Preview MAC"
-      ansible.builtin.debug:
-        msg: "- MAC: {{ normalized_mac }}"
-      when: address_needs_operation
-
-    - name: "📊 Display Stage 3 Analysis Header"
-      ansible.builtin.debug:
-        msg: "📊 階段3: Address Group 操作分析"
-
-    - name: "📊 Display Stage 3 Group Name"
-      ansible.builtin.debug:
-        msg: "Group Name: {{ target_address_group }}"
-
-    - name: "📊 Display Stage 3 Address In Group"
-      ansible.builtin.debug:
-        msg: "Address在Group中: {{ '是' if address_in_group else '否' }}"
-
-    - name: "📊 Display Stage 3 Needs Operation"
-      ansible.builtin.debug:
-        msg: "需要執行: {{ '是' if group_needs_operation else '否' }}"
-
-    - name: "📊 Display Stage 3 Current Members"
-      ansible.builtin.debug:
-        msg: "當前Members數: {{ original_group_members | length }}"
-
-    - name: "📊 Display Stage 3 Updated Members"
-      ansible.builtin.debug:
-        msg: "操作後Members數: {{ updated_group_members | length }}"
-      when: group_needs_operation
+        msg: |
+          📊 階段3: Address Group 操作分析
+          
+          Group Name: {{ target_address_group }}
+          Address在Group中: {{ '是' if address_in_group else '否' }}
+          需要執行: {{ '是' if group_needs_operation else '否' }}
+          當前Members數: {{ original_group_members | length }}
+          {% if group_needs_operation %}
+          操作後Members數: {{ updated_group_members | length }}
+          {% endif %}
 
     # ==================== 整合操作摘要 ====================
-    - name: "📊 Display Integrated Operations Summary Header"
+    - name: "📊 Integrated Operations Summary"
       ansible.builtin.debug:
-        msg: "📊 三階段操作總覽 v2.1"
+        msg: |
+          📊 三階段操作總覽 v2.1
+          
+          階段1 (DHCP): {{ '✅需要執行' if dhcp_needs_operation else '⏭️跳過' }} ({{ dhcp_operation_type }})
+          階段2 (Address): {{ '✅需要執行' if address_needs_operation else '⏭️跳過' }} ({{ address_operation_type }})
+          階段3 (Group): {{ '✅需要執行' if group_needs_operation else '⏭️跳過' }} (ADD_MEMBER)
+          
+          執行條件: 前一階段成功才執行下一階段
+          回滾機制: 後續階段失敗會回滾前面所有已完成的配置
 
-    - name: "📊 Display Stage 1 Summary"
+    - name: "ℹ️ No Operations Required"
       ansible.builtin.debug:
-        msg: "階段1 (DHCP): {{ '✅需要執行' if dhcp_needs_operation else '⏭️跳過' }} ({{ dhcp_operation_type }})"
-
-    - name: "📊 Display Stage 2 Summary"
-      ansible.builtin.debug:
-        msg: "階段2 (Address): {{ '✅需要執行' if address_needs_operation else '⏭️跳過' }} ({{ address_operation_type }})"
-
-    - name: "📊 Display Stage 3 Summary"
-      ansible.builtin.debug:
-        msg: "階段3 (Group): {{ '✅需要執行' if group_needs_operation else '⏭️跳過' }} (ADD_MEMBER)"
-
-    - name: "📊 Display Execution Conditions"
-      ansible.builtin.debug:
-        msg: "執行條件: 前一階段成功才執行下一階段"
-
-    - name: "📊 Display Rollback Mechanism"
-      ansible.builtin.debug:
-        msg: "回滾機制: 後續階段失敗會回滾前面所有已完成的配置"
-
-    - name: "ℹ️ Display No Operations Required Header"
-      ansible.builtin.debug:
-        msg: "ℹ️ 所有階段檢查完成 v2.1"
-      when: 
-        - not dhcp_needs_operation
-        - not address_needs_operation  
-        - not group_needs_operation
-
-    - name: "ℹ️ Display No Operations Required Message"
-      ansible.builtin.debug:
-        msg: "目前所有配置都已符合目標狀態，無需執行任何變更操作:"
-      when: 
-        - not dhcp_needs_operation
-        - not address_needs_operation  
-        - not group_needs_operation
-
-    - name: "ℹ️ Display DHCP Already Configured"
-      ansible.builtin.debug:
-        msg: "- DHCP Reserved Address: 已正確配置"
-      when: 
-        - not dhcp_needs_operation
-        - not address_needs_operation  
-        - not group_needs_operation
-
-    - name: "ℹ️ Display Address Already Configured"
-      ansible.builtin.debug:
-        msg: "- Firewall Address Object: 已正確配置"
-      when: 
-        - not dhcp_needs_operation
-        - not address_needs_operation  
-        - not group_needs_operation
-
-    - name: "ℹ️ Display Group Already Configured"
-      ansible.builtin.debug:
-        msg: "- Address Group Member: 已包含目標Address"
+        msg: |
+          ℹ️ 所有階段檢查完成 v2.1
+          
+          目前所有配置都已符合目標狀態，無需執行任何變更操作:
+          - DHCP Reserved Address: 已正確配置
+          - Firewall Address Object: 已正確配置  
+          - Address Group Member: 已包含目標Address
       when: 
         - not dhcp_needs_operation
         - not address_needs_operation  
@@ -616,34 +498,23 @@
       when: backup_enabled
 
     # ==================== 操作警告 ====================
-    - name: "⚠️ Display Three-Stage Configuration Change Warning Header"
+    - name: "⚠️ Three-Stage Configuration Change Warning"
       ansible.builtin.debug:
-        msg: "⚠️ 三階段操作警告 v2.1"
-      when: dhcp_needs_operation or address_needs_operation or group_needs_operation
-
-    - name: "⚠️ Display Change Warning Message"
-      ansible.builtin.debug:
-        msg: "此操作將依序執行以下配置變更："
-      when: dhcp_needs_operation or address_needs_operation or group_needs_operation
-
-    - name: "⚠️ Display DHCP Change Warning"
-      ansible.builtin.debug:
-        msg: "1. {{ '創建新的' if dhcp_operation_type == 'CREATE' else '修改既有的' }}DHCP Reserved Address"
-      when: dhcp_needs_operation
-
-    - name: "⚠️ Display Address Change Warning"
-      ansible.builtin.debug:
-        msg: "2. {{ '創建新的' if address_operation_type == 'CREATE' else '修改既有的' }}Firewall Address Object"
-      when: address_needs_operation
-
-    - name: "⚠️ Display Group Change Warning"
-      ansible.builtin.debug:
-        msg: "3. 將Address Object加入Address Group成員"
-      when: group_needs_operation
-
-    - name: "⚠️ Display Approval Reminder"
-      ansible.builtin.debug:
-        msg: "請在Approval Node中仔細確認所有階段的變更後再批准執行！"
+        msg: |
+          ⚠️ 三階段操作警告 v2.1
+          
+          此操作將依序執行以下配置變更：
+          {% if dhcp_needs_operation %}
+          1. {{ '創建新的' if dhcp_operation_type == 'CREATE' else '修改既有的' }}DHCP Reserved Address
+          {% endif %}
+          {% if address_needs_operation %}
+          2. {{ '創建新的' if address_operation_type == 'CREATE' else '修改既有的' }}Firewall Address Object
+          {% endif %}
+          {% if group_needs_operation %}
+          3. 將Address Object加入Address Group成員
+          {% endif %}
+          
+          請在Approval Node中仔細確認所有階段的變更後再批准執行！
       when: dhcp_needs_operation or address_needs_operation or group_needs_operation
 
     # ==================== 計算預覽時間 ====================
@@ -686,30 +557,15 @@
           wf_three_stage_operations: true
           wf_preview_version: "v2.1"
 
-    - name: "🎯 Display Three-Stage Preview Complete Header"
+    - name: "🎯 Three-Stage Preview Complete"
       ansible.builtin.debug:
-        msg: "🎯 三階段整合預覽完成 | 版本: v2.1"
-
-    - name: "🎯 Display Preview Summary Header"
-      ansible.builtin.debug:
-        msg: "摘要:"
-
-    - name: "🎯 Display Stage 1 Preview Summary"
-      ansible.builtin.debug:
-        msg: "- 階段1 (DHCP): {{ dhcp_operation_type }} | {{ '需要執行' if dhcp_needs_operation else '跳過' }}"
-
-    - name: "🎯 Display Stage 2 Preview Summary"
-      ansible.builtin.debug:
-        msg: "- 階段2 (Address): {{ address_operation_type }} | {{ '需要執行' if address_needs_operation else '跳過' }}"
-
-    - name: "🎯 Display Stage 3 Preview Summary"
-      ansible.builtin.debug:
-        msg: "- 階段3 (Group): ADD_MEMBER | {{ '需要執行' if group_needs_operation else '跳過' }}"
-
-    - name: "🎯 Display Target Information"
-      ansible.builtin.debug:
-        msg: "目標: {{ target_ip }} | {{ normalized_mac }} | {{ target_description }}"
-
-    - name: "🎯 Display Waiting for Approval"
-      ansible.builtin.debug:
-        msg: "等待人工確認..."
+        msg: |
+          🎯 三階段整合預覽完成 | 版本: v2.1
+          
+          摘要:
+          - 階段1 (DHCP): {{ dhcp_operation_type }} | {{ '需要執行' if dhcp_needs_operation else '跳過' }}
+          - 階段2 (Address): {{ address_operation_type }} | {{ '需要執行' if address_needs_operation else '跳過' }}
+          - 階段3 (Group): ADD_MEMBER | {{ '需要執行' if group_needs_operation else '跳過' }}
+          
+          目標: {{ target_ip }} | {{ normalized_mac }} | {{ target_description }}
+          等待人工確認...
