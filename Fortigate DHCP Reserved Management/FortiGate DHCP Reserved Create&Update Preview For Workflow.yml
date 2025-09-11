@@ -559,7 +559,7 @@
 
     - name: "🎯 Three-Stage Preview Complete"
       ansible.builtin.debug:
-        msg: |
+        msg: |-
           🎯 三階段整合預覽完成 | 版本: v2.1
           
           摘要:
