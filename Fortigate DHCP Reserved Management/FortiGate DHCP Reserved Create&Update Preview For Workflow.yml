@@ -4,7 +4,7 @@
 # 用途：預覽DHCP Reserved Address + Firewall Address Object + Address Group的三階段操作
 # 功能：智能檢測衝突、分析現有配置、判斷操作類型、驗證IP範圍、Address重複檢查
 # 輸出：顯示三階段配置變更預覽，設定workflow變數
-# 版本：v2.1 - 修正輸出斷行問題，統一命名規範，使用pause模組改善顯示
+# 版本：v2.1 - 修正輸出斷行問題，統一命名規範，自定義IP範圍規則
 # =============================================================================
 
 - name: FortiGate DHCP + Firewall Address Management Preview For Workflow v2.1
@@ -27,6 +27,15 @@
       "12":
         dhcp_description: "vlan22_FIC_WAN"
         address_group: "Group_22_FIC_Allow-MAC"
+    
+    # 自定義IP範圍規則
+    custom_ip_range_mapping:
+      "2":
+        start_suffix: "150"
+        end_suffix: "240"
+      "12":
+        start_suffix: "151"
+        end_suffix: "190"
     
     # API 連接參數
     api_retries: "{{ fortigate_api_retries | default('3') | int }}"
@@ -155,39 +164,47 @@
       retries: "{{ api_retries }}"
       delay: "{{ api_delay }}"
 
-    - name: "🔍 Validate IP Range"
+    - name: "🔍 Extract API Network Prefix"
       ansible.builtin.set_fact:
         server_config: "{{ dhcp_server_config.json.results | first }}"
-        ip_range_start: "{{ (dhcp_server_config.json.results | first)['ip-range'][0]['start-ip'] }}"
-        ip_range_end: "{{ (dhcp_server_config.json.results | first)['ip-range'][0]['end-ip'] }}"
+        api_ip_range_start: "{{ (dhcp_server_config.json.results | first)['ip-range'][0]['start-ip'] }}"
+        api_ip_range_end: "{{ (dhcp_server_config.json.results | first)['ip-range'][0]['end-ip'] }}"
+        ip_network_prefix: "{{ (dhcp_server_config.json.results | first)['ip-range'][0]['start-ip'].split('.')[0:3] | join('.') }}"
 
-    - name: "🔍 Check IP Within Range"
+    - name: "🔧 Apply Custom IP Range Rules"
+      ansible.builtin.set_fact:
+        ip_range_start: "{{ ip_network_prefix }}.{{ custom_ip_range_mapping[target_dhcp_server_id].start_suffix }}"
+        ip_range_end: "{{ ip_network_prefix }}.{{ custom_ip_range_mapping[target_dhcp_server_id].end_suffix }}"
+
+    - name: "🔍 Check IP Within Custom Range"
       ansible.builtin.set_fact:
         ip_in_range: "{{ target_ip | ansible.utils.ipaddr and target_ip | ansible.utils.ipaddr >= ip_range_start | ansible.utils.ipaddr and target_ip | ansible.utils.ipaddr <= ip_range_end | ansible.utils.ipaddr }}"
 
     - name: "❌ IP Out of Range Error"
       ansible.builtin.fail:
         msg: |
-          ❌ IP地址超出DHCP Server範圍！
+          ❌ IP地址超出DHCP Server自定義範圍！
           
           詳情：
           - 目標IP: {{ target_ip }}
           - DHCP Server ID: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }})
-          - 允許範圍: {{ ip_range_start }} - {{ ip_range_end }}
+          - 自定義允許範圍: {{ ip_range_start }} - {{ ip_range_end }}
+          - 網段前綴: {{ ip_network_prefix }} (從API讀取)
+          - API原始範圍: {{ api_ip_range_start }} - {{ api_ip_range_end }}
           
           解決方案：
-          1. 選擇範圍內的IP地址
+          1. 選擇自定義範圍內的IP地址
           2. 或者選擇正確的DHCP Server ID
       when: not ip_in_range
 
     # ==================== 預覽資訊顯示 ====================
     - name: "📋 Three-Stage Preview Information Header"
-      ansible.builtin.pause:
-        seconds: 1
-        prompt: |
-          
-          ==================== FortiGate DHCP Reserved Create&Update Preview v2.1 ====================
-          
+      ansible.builtin.debug:
+        msg: "==================== FortiGate DHCP Reserved Create&Update Preview v2.1 ===================="
+
+    - name: "📋 Three-Stage Preview Parameters Summary"
+      ansible.builtin.debug:
+        msg: |
           🔍 三階段整合預覽模式 v2.1
           
           輸入參數:
@@ -195,16 +212,19 @@
           - 目標MAC: {{ normalized_mac }}
           - 描述: {{ target_description }}
           - DHCP Server: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }})
-          - IP範圍: {{ ip_range_start }}-{{ ip_range_end }}
+          - 自定義IP範圍: {{ ip_range_start }}-{{ ip_range_end }}
+          - API原始範圍: {{ api_ip_range_start }}-{{ api_ip_range_end }}
           
           三階段操作:
           - 階段1: DHCP Reserved Address
           - 階段2: Firewall Address Object ({{ target_address_name }})
           - 階段3: Address Group Member ({{ target_address_group }})
-          
-          正在分析配置...
 
     # ==================== 階段1: DHCP 配置分析區塊 ====================
+    - name: "📊 Stage 1: DHCP Configuration Analysis Section Header"
+      ansible.builtin.debug:
+        msg: "==================== 階段1: DHCP 配置分析 ===================="
+
     - name: "🔍 Get Current DHCP Reserved Addresses"
       ansible.builtin.uri:
         url: "https://{{ fortigate_host }}/api/v2/cmdb/system.dhcp/server/{{ target_dhcp_server_id }}/reserved-address"
@@ -217,6 +237,10 @@
       register: existing_reservations
       retries: "{{ api_retries }}"
       delay: "{{ api_delay }}"
+
+    - name: "🔍 DHCP Configuration Information"
+      ansible.builtin.debug:
+        msg: "🔍 分析DHCP配置 | 總計: {{ existing_reservations.json.results | length }} 筆 | 目標IP: {{ target_ip }} | 目標MAC: {{ normalized_mac }}"
 
     # MAC 衝突檢測
     - name: "🔍 MAC Conflict Detection"
@@ -271,6 +295,10 @@
           {%- endif -%}
 
     # ==================== 階段2: Firewall Address Object 分析區塊 ====================
+    - name: "🔥 Stage 2: Firewall Address Object Analysis Section Header"
+      ansible.builtin.debug:
+        msg: "==================== 階段2: Firewall Address Object 分析 ===================="
+
     - name: "🔍 Get Current Firewall Address Objects"
       ansible.builtin.uri:
         url: "https://{{ fortigate_host }}/api/v2/cmdb/firewall/address/{{ target_address_name }}"
@@ -308,6 +336,10 @@
           {%- endif -%}
 
     # ==================== 階段3: Address Group 分析區塊 ====================
+    - name: "👥 Stage 3: Address Group Analysis Section Header"
+      ansible.builtin.debug:
+        msg: "==================== 階段3: Address Group 分析 ===================="
+
     - name: "🔍 Get Address Group Configuration"
       ansible.builtin.uri:
         url: "https://{{ fortigate_host }}/api/v2/cmdb/firewall/addrgrp/{{ target_address_group }}"
@@ -338,13 +370,13 @@
         group_needs_operation: "{{ target_address_name not in group_member_names }}"
 
     # ==================== 三階段配置變更預覽區塊 ====================
-    - name: "📊 Three-Stage Configuration Change Preview"
-      ansible.builtin.pause:
-        seconds: 2
-        prompt: |
-          
-          ==================== 三階段配置變更預覽 ====================
-          
+    - name: "📊 Three-Stage Configuration Change Preview Section Header"
+      ansible.builtin.debug:
+        msg: "==================== 三階段配置變更預覽 ===================="
+
+    - name: "📊 Stage 1: DHCP Operation Analysis"
+      ansible.builtin.debug:
+        msg: |
           📊 階段1: DHCP 操作分析
           
           操作類型: {{ dhcp_operation_type }}
@@ -365,9 +397,10 @@
           - MAC: {{ normalized_mac }}
           - 描述: {{ target_description }}
           {% endif %}
-          
-          ──────────────────────────────────────────────────
-          
+
+    - name: "📊 Stage 2: Address Object Operation Analysis"
+      ansible.builtin.debug:
+        msg: |
           📊 階段2: Address Object 操作分析
           
           Address Name: {{ target_address_name }}
@@ -389,9 +422,10 @@
           - Comment: {{ target_ip }}
           - MAC: {{ normalized_mac }}
           {% endif %}
-          
-          ──────────────────────────────────────────────────
-          
+
+    - name: "📊 Stage 3: Address Group Operation Analysis"
+      ansible.builtin.debug:
+        msg: |
           📊 階段3: Address Group 操作分析
           
           Group Name: {{ target_address_group }}
@@ -404,10 +438,8 @@
 
     # ==================== 整合操作摘要 ====================
     - name: "📊 Integrated Operations Summary"
-      ansible.builtin.pause:
-        seconds: 1
-        prompt: |
-          
+      ansible.builtin.debug:
+        msg: |
           📊 三階段操作總覽 v2.1
           
           階段1 (DHCP): {{ '✅需要執行' if dhcp_needs_operation else '⏭️跳過' }} ({{ dhcp_operation_type }})
@@ -418,10 +450,8 @@
           回滾機制: 後續階段失敗會回滾前面所有已完成的配置
 
     - name: "ℹ️ No Operations Required"
-      ansible.builtin.pause:
-        seconds: 1
-        prompt: |
-          
+      ansible.builtin.debug:
+        msg: |
           ℹ️ 所有階段檢查完成 v2.1
           
           目前所有配置都已符合目標狀態，無需執行任何變更操作:
@@ -461,15 +491,16 @@
           ip_range:
             start: "{{ ip_range_start }}"
             end: "{{ ip_range_end }}"
+            network_prefix: "{{ ip_network_prefix }}"
+            api_original_start: "{{ api_ip_range_start }}"
+            api_original_end: "{{ api_ip_range_end }}"
           purpose: "記錄三階段操作前的原始配置狀態 v2.1"
       when: backup_enabled
 
     # ==================== 操作警告 ====================
     - name: "⚠️ Three-Stage Configuration Change Warning"
-      ansible.builtin.pause:
-        seconds: 3
-        prompt: |
-          
+      ansible.builtin.debug:
+        msg: |
           ⚠️ 三階段操作警告 v2.1
           
           此操作將依序執行以下配置變更：
@@ -527,10 +558,8 @@
           wf_preview_version: "v2.1"
 
     - name: "🎯 Three-Stage Preview Complete"
-      ansible.builtin.pause:
-        seconds: 1
-        prompt: |
-          
+      ansible.builtin.debug:
+        msg: |
           🎯 三階段整合預覽完成 | 版本: v2.1
           
           摘要:
