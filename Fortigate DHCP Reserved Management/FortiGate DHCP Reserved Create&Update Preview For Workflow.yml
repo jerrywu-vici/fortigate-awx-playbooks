@@ -560,11 +560,7 @@
     - name: "🎯 Three-Stage Preview Complete"
       ansible.builtin.debug:
         msg: |
-          🎯 三階段整合預覽完成 | 版本: v2.1
-          
-          摘要:
-          - 階段1 (DHCP): {{ dhcp_operation_type }} | {{ '需要執行' if dhcp_needs_operation else '跳過' }}
-          - 階段2 (Address): {{ address_operation_type }} | {{ '需要執行' if address_needs_operation else '跳過' }}
+          🎯 三階段整合預覽完成 | 版本: v2.1\n\n摘要:\n- 階段1 (DHCP): {{ dhcp_operation_type }} | {{ '需要執行' if dhcp_needs_operation else '跳過' }}\n- 階段2 (Address): {{ address_operation_type }} | {{ '需要執行' if address_needs_operation else '跳過' }}
           - 階段3 (Group): ADD_MEMBER | {{ '需要執行' if group_needs_operation else '跳過' }}
           
           目標: {{ target_ip }} | {{ normalized_mac }} | {{ target_description }}
