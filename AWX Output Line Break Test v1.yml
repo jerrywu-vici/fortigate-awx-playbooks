@@ -1,5 +1,5 @@
 ---
-- name: AWX Output Line Break Test v1
+- name: AWX Output Line Break Test v2
   hosts: localhost
   connection: local
   gather_facts: false
@@ -8,128 +8,103 @@
     test_ip: "172.23.40.176"
     test_mac: "e8:b0:c5:ca:71:f5"
     test_description: "Daphne_NB_WLAN"
-    dhcp_operation_type: "UPDATE"
-    address_operation_type: "UPDATE"
-    dhcp_needs_operation: false
-    address_needs_operation: false
-    group_needs_operation: false
 
   tasks:
-    - name: "🧪 Test 1: Basic Multi-line with |- syntax"
-      ansible.builtin.debug:
-        msg: "{{ test_msg_1 }}"
-      vars:
-        test_msg_1: |-
-          🧪 測試1: 基本多行輸出
-          
-          這是第一行
-          這是第二行
-          這是第三行
-
-    - name: "🧪 Test 2: Complex Multi-line with Variables"
-      ansible.builtin.debug:
-        msg: "{{ test_msg_2 }}"
-      vars:
-        test_msg_2: |-
-          🧪 測試2: 包含變數的多行輸出
+    - name: "🧪 Test A: Using pause module"
+      ansible.builtin.pause:
+        prompt: |-
+          🧪 測試A: 使用pause模組
           
           基本參數:
           - IP: {{ test_ip }}
           - MAC: {{ test_mac }}
           - 描述: {{ test_description }}
           
-          操作狀態:
-          - DHCP操作: {{ dhcp_operation_type }} | {{ '需要執行' if dhcp_needs_operation else '跳過' }}
-          - Address操作: {{ address_operation_type }} | {{ '需要執行' if address_needs_operation else '跳過' }}
+          這樣能正確斷行嗎？
+          按 Enter 繼續...
+        seconds: 1
 
-    - name: "🧪 Test 3: Error Message Format"
-      ansible.builtin.debug:
-        msg: "{{ error_msg }}"
-      vars:
-        error_msg: |-
-          ❌ IP地址超出DHCP Server自定義範圍！
+    - name: "🧪 Test B: Using assert (always true)"
+      ansible.builtin.assert:
+        that: true
+        success_msg: |-
+          🧪 測試B: 使用assert成功訊息
           
-          詳情：
-          - 目標IP: {{ test_ip }}
-          - DHCP Server ID: 2 (vlan40_PC)
-          - 自定義允許範圍: 172.23.40.150 - 172.23.40.240
-          - 網段前綴: 172.23.40 (從API讀取)
-          - API原始範圍: 172.23.40.11 - 172.23.40.147
-          
-          解決方案：
-          1. 選擇自定義範圍內的IP地址
-          2. 或者選擇正確的DHCP Server ID
+          這是成功訊息的多行測試
+          第一行內容
+          第二行內容
+          第三行內容
 
-    - name: "🧪 Test 4: Preview Complete Format"
-      ansible.builtin.debug:
-        msg: "{{ preview_msg }}"
-      vars:
-        preview_msg: |-
-          🎯 三階段整合預覽完成 | 版本: v2.1
+    - name: "🧪 Test C: Using fail with when false"
+      ansible.builtin.fail:
+        msg: |-
+          🧪 測試C: 使用fail模組（但不會真的失敗）
           
-          摘要:
-          - 階段1 (DHCP): {{ dhcp_operation_type }} | {{ '需要執行' if dhcp_needs_operation else '跳過' }}
-          - 階段2 (Address): {{ address_operation_type }} | {{ '需要執行' if address_needs_operation else '跳過' }}
-          - 階段3 (Group): ADD_MEMBER | {{ '需要執行' if group_needs_operation else '跳過' }}
-          
-          目標: {{ test_ip }} | {{ test_mac }} | {{ test_description }}
-          等待人工確認...
+          這個應該不會執行，因為when條件是false
+          但如果執行了，能看到斷行嗎？
+      when: false
 
-    - name: "🧪 Test 5: Conditional Content"
+    - name: "🧪 Test D: Using shell echo"
+      ansible.builtin.shell: |
+        echo "🧪 測試D: 使用shell echo"
+        echo ""
+        echo "基本參數:"
+        echo "- IP: {{ test_ip }}"
+        echo "- MAC: {{ test_mac }}"
+        echo "- 描述: {{ test_description }}"
+        echo ""
+        echo "多行輸出測試完成"
+      register: shell_result
+
+    - name: "🧪 Test D Result: Display shell output"
       ansible.builtin.debug:
-        msg: "{{ conditional_msg }}"
+        var: shell_result.stdout
+
+    - name: "🧪 Test E: Using template to file"
+      ansible.builtin.template:
+        src: test_template.j2
+        dest: /tmp/test_output.txt
       vars:
-        show_details: true
-        conditional_msg: |-
-          📊 階段1: DHCP 操作分析
+        template_content: |-
+          🧪 測試E: 使用template模組
           
-          操作類型: {{ dhcp_operation_type }}
-          需要執行: {{ '是' if dhcp_needs_operation else '否' }}
-          檢查配置數: 5
-          {% if show_details %}
-          
-          當前配置:
-          - ID: 123
+          基本參數:
           - IP: {{ test_ip }}
           - MAC: {{ test_mac }}
           - 描述: {{ test_description }}
-          {% endif %}
-          {% if not dhcp_needs_operation %}
           
-          配置已是最新狀態，無需變更
-          {% endif %}
+          這是template模組的測試
+      ignore_errors: true
 
-    - name: "🧪 Test 6: Simple vs Complex"
-      ansible.builtin.debug:
-        msg: "簡單單行測試: {{ test_ip }} | {{ test_mac }}"
+    - name: "🧪 Test E Result: Read template file"
+      ansible.builtin.slurp:
+        src: /tmp/test_output.txt
+      register: template_result
+      ignore_errors: true
 
-    - name: "🧪 Test 7: Using |2 syntax (alternative)"
+    - name: "🧪 Test E Output"
       ansible.builtin.debug:
-        msg: "{{ alt_msg }}"
-      vars:
-        alt_msg: |2
-          🔧 替代語法測試
-          
-            縮排測試第一行
-            縮排測試第二行
-          
-          結束測試
+        msg: "{{ template_result.content | b64decode }}"
+      when: template_result is defined and not template_result.failed
 
-    - name: "✅ Test Complete"
+    - name: "🧪 Test F: Using lineinfile for each line"
       ansible.builtin.debug:
-        msg: "{{ complete_msg }}"
-      vars:
-        complete_msg: |-
-          ✅ AWX 輸出斷行測試完成
-          
-          如果以上所有測試都能正確顯示多行格式，
-          表示方案5有效，可以套用到完整的playbook中。
-          
-          測試結果摘要:
-          - 基本多行: 測試1
-          - 變數插入: 測試2  
-          - 錯誤訊息: 測試3
-          - 預覽格式: 測試4
-          - 條件內容: 測試5
-          - 簡單格式: 測試6
-          - 替代語法: 測試7
+        msg: "{{ item }}"
+      loop:
+        - "🧪 測試F: 逐行輸出"
+        - ""
+        - "基本參數:"
+        - "- IP: {{ test_ip }}"
+        - "- MAC: {{ test_mac }}"
+        - "- 描述: {{ test_description }}"
+        - ""
+        - "逐行輸出測試完成"
+
+    - name: "🧪 Test G: Using command printf"
+      ansible.builtin.command: 
+        cmd: printf "🧪 測試G: 使用printf\n\n基本參數:\n- IP: {{ test_ip }}\n- MAC: {{ test_mac }}\n- 描述: {{ test_description }}\n\n測試完成\n"
+      register: printf_result
+
+    - name: "🧪 Test G Result: Display printf output"
+      ansible.builtin.debug:
+        var: printf_result.stdout
