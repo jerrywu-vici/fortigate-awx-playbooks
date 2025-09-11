@@ -102,7 +102,7 @@
 
     - name: "🧪 Test G: Using command printf"
       ansible.builtin.command: 
-        cmd: printf "🧪 測試G: 使用printf\n\n基本參數:\n- IP: {{ test_ip }}\n- MAC: {{ test_mac }}\n- 描述: {{ test_description }}\n\n測試完成\n"
+        cmd: "printf \"🧪 測試G: 使用printf\\\\n\\\\n基本參數:\\\\n- IP: {{ test_ip }}\\\\n- MAC: {{ test_mac }}\\\\n- 描述: {{ test_description }}\\\\n\\\\n測試完成\\\\n\""
       register: printf_result
 
     - name: "🧪 Test G Result: Display printf output"
