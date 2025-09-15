@@ -565,8 +565,9 @@
           wf_preview_version: "v2.2"
 
     - name: "🎯 Three-Stage Preview Complete"
-      ansible.builtin.debug:
-        msg: |
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
           🎯 三階段整合預覽完成 | 版本: v2.2
           
           摘要:
