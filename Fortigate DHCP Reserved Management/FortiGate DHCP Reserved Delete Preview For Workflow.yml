@@ -1,13 +1,13 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address Delete + Firewall Address Delete Preview v6.0
+# FortiGate DHCP Reserved Address Delete + Firewall Address Delete Preview v6.1
 # 用途：預覽要刪除的MAC配置（DHCP + Firewall Address）
 # 功能：整合DHCP Reserved和Firewall Address的預覽功能
 # 輸出：顯示DHCP和Firewall兩個功能的變更預覽，設定workflow變數
-# 版本：v6.0 - 優化代碼結構，統一版本號
+# 版本：v6.1 - 使用pause模組修正輸出斷行問題
 # =============================================================================
 
-- name: FortiGate DHCP Reserved Delete Preview For Workflow v6.0
+- name: FortiGate DHCP Reserved Delete Preview For Workflow v6.1
   hosts: localhost
   connection: local
   gather_facts: true
@@ -104,11 +104,17 @@
     # ==================== 預覽資訊顯示 ====================
     - name: "📋 Preview Information Header"
       ansible.builtin.debug:
-        msg: "==================== FortiGate DHCP + Firewall Delete Preview v6.0 ===================="
+        msg: "==================== FortiGate DHCP + Firewall Delete Preview v6.1 ===================="
 
     - name: "📋 Preview Parameters Summary"
-      ansible.builtin.debug:
-        msg: "🔍 整合預覽模式 | 目標MAC: {{ normalized_mac }} | DHCP Server: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }}) | Address Group: {{ target_address_group }} | Host: {{ fortigate_host }}"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          🔍 整合預覽模式 | 目標MAC: {{ normalized_mac }}
+          
+          DHCP Server: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }})
+          Address Group: {{ target_address_group }}
+          Host: {{ fortigate_host }}
 
     # ==================== DHCP 功能預覽區塊 ====================
     - name: "📊 DHCP Preview Section Header"
@@ -146,8 +152,15 @@
         msg: "{{ '✅ DHCP搜尋成功' if dhcp_target_object is defined else '⚠️ DHCP中未找到目標MAC' }} | 檢查: {{ existing_reservations.json.results | length }} 筆 | 找到: {{ '1' if dhcp_target_object is defined else '0' }} 筆"
 
     - name: "📊 DHCP Current Configuration"
-      ansible.builtin.debug:
-        msg: "📊 DHCP當前配置 | ID: {{ dhcp_target_object.id }} | IP: {{ dhcp_target_object.ip }} | MAC: {{ dhcp_target_object.mac }} | 描述: {{ dhcp_target_object.description | default('空白') }}"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          📊 DHCP當前配置
+          
+          ID: {{ dhcp_target_object.id }}
+          IP: {{ dhcp_target_object.ip }}
+          MAC: {{ dhcp_target_object.mac }}
+          描述: {{ dhcp_target_object.description | default('空白') }}
       when: dhcp_target_object is defined
 
     - name: "🧮 Calculate DHCP Reserved MAC"
@@ -159,8 +172,15 @@
       when: dhcp_target_object is defined
 
     - name: "🔄 DHCP After Delete Configuration Preview"
-      ansible.builtin.debug:
-        msg: "🔄 DHCP還原預覽 | ID: {{ dhcp_target_object.id }} | IP: {{ dhcp_target_object.ip }} | MAC: {{ dhcp_reserved_mac }} | 描述: Reserved"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          🔄 DHCP還原預覽
+          
+          ID: {{ dhcp_target_object.id }}
+          IP: {{ dhcp_target_object.ip }}
+          MAC: {{ dhcp_reserved_mac }}
+          描述: Reserved
       when: dhcp_target_object is defined
 
     # ==================== Firewall 功能預覽區塊 ====================
@@ -215,8 +235,14 @@
         mac_address_count: "{{ firewall_addresses.json.results | selectattr('name', 'defined') | selectattr('name', 'match', '^MAC_.*') | list | length }}"
 
     - name: "📊 Firewall Target Address Information"
-      ansible.builtin.debug:
-        msg: "📊 Firewall目標配置 | Name: {{ firewall_target_object.name }} | MAC: {{ found_macaddr }} | Comment: {{ firewall_target_object.comment | default('無') }}"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          📊 Firewall目標配置
+          
+          Name: {{ firewall_target_object.name }}
+          MAC: {{ found_macaddr }}
+          Comment: {{ firewall_target_object.comment | default('無') }}
       when: firewall_target_object is defined
 
     # ==================== Address Group 處理區塊 ====================
@@ -250,15 +276,27 @@
         - address_group_config.json.results | length > 0
 
     - name: "📊 Address Group Current Status"
-      ansible.builtin.debug:
-        msg: "📊 Address Group狀態 | 名稱: {{ target_address_group }} | 目標Address在Group中: {{ 'YES' if address_in_group else 'NO' }} | 當前Members數: {{ original_group_members | length }}"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          📊 Address Group狀態
+          
+          名稱: {{ target_address_group }}
+          目標Address在Group中: {{ 'YES' if address_in_group else 'NO' }}
+          當前Members數: {{ original_group_members | length }}
       when: 
         - firewall_target_object is defined
         - group_data is defined
 
     - name: "🔄 Address Group After Remove Preview"
-      ansible.builtin.debug:
-        msg: "🔄 移除後預覽 | Group: {{ target_address_group }} | 移除Member: {{ firewall_target_object.name }} | 剩餘Members數: {{ updated_group_members | length }}"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          🔄 移除後預覽
+          
+          Group: {{ target_address_group }}
+          移除Member: {{ firewall_target_object.name }}
+          剩餘Members數: {{ updated_group_members | length }}
       when: 
         - firewall_target_object is defined
         - address_in_group is defined
@@ -270,8 +308,14 @@
         msg: "==================== 整合預覽總結 ===================="
 
     - name: "📊 Operations Summary"
-      ansible.builtin.debug:
-        msg: "📊 操作總覽 | DHCP操作: {{ 'YES' if dhcp_target_object is defined else 'SKIP' }} | Firewall操作: {{ 'YES' if firewall_target_object is defined else 'SKIP' }} | Address在Group中: {{ 'YES' if (firewall_target_object is defined and address_in_group is defined and address_in_group) else 'NO' }}"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          📊 操作總覽
+          
+          DHCP操作: {{ 'YES' if dhcp_target_object is defined else 'SKIP' }}
+          Firewall操作: {{ 'YES' if firewall_target_object is defined else 'SKIP' }}
+          Address在Group中: {{ 'YES' if (firewall_target_object is defined and address_in_group is defined and address_in_group) else 'NO' }}
 
     - name: "💾 Record Original Configuration for Backup"
       ansible.builtin.set_fact:
@@ -288,8 +332,12 @@
       when: backup_enabled
 
     - name: "⚠️ Configuration Change Warning"
-      ansible.builtin.debug:
-        msg: "⚠️ 警告：此操作將永久修改FortiGate的DHCP和Firewall配置！請在Approval Node中仔細確認後再批准執行。"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          ⚠️ 警告：此操作將永久修改FortiGate的DHCP和Firewall配置！
+          
+          請在Approval Node中仔細確認後再批准執行。
 
     # ==================== Workflow 變數設定 ====================
     - name: "📤 Set Integrated Workflow Variables"
@@ -320,8 +368,15 @@
           wf_server_info: "{{ server_info | to_json }}"
           wf_backup_info: "{{ integrated_backup_info | default({}) | to_json }}"
           wf_vdom_name: "{{ fortigate_vdom | default('root') }}"
-          wf_preview_version: "v6.0"
+          wf_preview_version: "v6.1"
 
     - name: "🎯 Integrated Preview Complete"
-      ansible.builtin.debug:
-        msg: "🎯 整合預覽完成 | 等待人工確認 | MAC: {{ normalized_mac }} | DHCP: {{ 'YES' if dhcp_target_object is defined else 'SKIP' }} | Firewall: {{ 'YES' if firewall_target_object is defined else 'SKIP' }} | 版本: v6.0"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          🎯 整合預覽完成 | 等待人工確認
+          
+          MAC: {{ normalized_mac }}
+          DHCP: {{ 'YES' if dhcp_target_object is defined else 'SKIP' }}
+          Firewall: {{ 'YES' if firewall_target_object is defined else 'SKIP' }}
+          版本: v6.1
