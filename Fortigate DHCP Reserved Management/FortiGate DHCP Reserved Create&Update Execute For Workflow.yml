@@ -146,7 +146,7 @@
 
     - name: "⏸️ Format Output Pause"
       ansible.builtin.pause:
-        seconds: 2
+        seconds: 1
 
     - name: "📊 Operations Overview"
       ansible.builtin.debug:
@@ -160,7 +160,7 @@
 
     - name: "⏸️ Format Output Pause"
       ansible.builtin.pause:
-        seconds: 2
+        seconds: 1
 
     # ==================== 無需操作處理 ====================
     - name: "ℹ️ No Operations Required"
@@ -179,7 +179,7 @@
 
     - name: "⏸️ Format Output Pause"
       ansible.builtin.pause:
-        seconds: 2
+        seconds: 1
       when: 
         - not dhcp_needs_operation
         - not address_needs_operation
@@ -274,7 +274,7 @@
 
     - name: "⏸️ Format Output Pause"
       ansible.builtin.pause:
-        seconds: 2
+        seconds: 1
       when: stage1_completed
 
     - name: "❌ Stage 1: DHCP Operation Failed"
@@ -364,7 +364,7 @@
 
     - name: "⏸️ Format Output Pause"
       ansible.builtin.pause:
-        seconds: 2
+        seconds: 1
       when: stage2_completed
 
     - name: "❌ Stage 2: Address Operation Failed - Initiating Rollback"
@@ -449,7 +449,7 @@
 
     - name: "⏸️ Format Output Pause"
       ansible.builtin.pause:
-        seconds: 2
+        seconds: 1
       when: stage3_completed
 
     - name: "❌ Stage 3: Group Operation Failed - Initiating Full Rollback"
@@ -586,7 +586,7 @@
 
     - name: "⏸️ Format Output Pause"
       ansible.builtin.pause:
-        seconds: 2
+        seconds: 1
 
     # ==================== 計算執行時間 ====================
     - name: "⏱️ Calculate Execution Statistics"
@@ -601,8 +601,7 @@
     - name: "📊 Final Summary Section Header"
       ansible.builtin.debug:
         msg: "==================== 三階段操作最終摘要 ===================="
-
-    - name: "📊 Three-Stage Operation Results Summary"
+        - name: "📊 Three-Stage Operation Results Summary"
       ansible.builtin.debug:
         msg: |
           📊 三階段整合操作結果摘要 v2.2
@@ -656,7 +655,7 @@
 
     - name: "⏸️ Format Output Pause"
       ansible.builtin.pause:
-        seconds: 2
+        seconds: 1
 
     - name: "📊 Environment Configuration Details"
       ansible.builtin.debug:
@@ -678,7 +677,7 @@
 
     - name: "⏸️ Format Output Pause"
       ansible.builtin.pause:
-        seconds: 2
+        seconds: 1
 
     - name: "📅 Completion Information"
       ansible.builtin.debug:
