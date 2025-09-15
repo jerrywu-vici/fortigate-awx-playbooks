@@ -1,129 +1,41 @@
 ---
-# =============================================================================
-# 測試輸出斷行格式 - Test Output Line Break Format
-# 用途：測試不同模組的多行輸出效果
-# =============================================================================
-
-- name: Test Output Line Break Format
+- name: Test Pause Without Wait
   hosts: localhost
   connection: local
   gather_facts: false
 
-  vars:
-    test_ip: "172.23.40.172"
-    test_mac: "aa:bb:cc:dd:ee:ff"
-    test_description: "TestDevice"
-    test_operation: "CREATE"
-    test_group_members: 10
-
   tasks:
-    - name: "🧪 測試開始"
+    - name: "🧪 測試pause的不同參數"
       ansible.builtin.debug:
-        msg: "==================== 輸出斷行測試 ===================="
+        msg: "開始測試pause參數"
 
-    # ==================== 測試1: 原始debug模組 ====================
-    - name: "🔍 測試1: 原始debug模組 (有問題的方式)"
-      ansible.builtin.debug:
-        msg: |
-          📊 階段測試: 原始debug模組
-          
-          基本參數:
-          - IP: {{ test_ip }}
-          - MAC: {{ test_mac }}
-          - 描述: {{ test_description }}
-          - 操作類型: {{ test_operation }}
-          
-          詳細資訊:
-          - Group Members數: {{ test_group_members }}
-          - 需要執行: 是
-          - 狀態: 正常
-
-    # ==================== 測試2: pause模組 (無等待時間) ====================
-    - name: "🔍 測試2: pause模組 (無等待時間)"
+    # 測試1: 不設定seconds參數
+    - name: "🔍 測試A: pause不設定seconds"
       ansible.builtin.pause:
         prompt: |
-          📊 階段測試: pause模組無等待
+          📊 測試A: 不設定seconds參數
           
           基本參數:
-          - IP: {{ test_ip }}
-          - MAC: {{ test_mac }}
-          - 描述: {{ test_description }}
-          - 操作類型: {{ test_operation }}
-          
-          詳細資訊:
-          - Group Members數: {{ test_group_members }}
-          - 需要執行: 是
-          - 狀態: 正常
+          - IP: 172.23.40.172
+          - MAC: aa:bb:cc:dd:ee:ff
+
+    # 測試2: seconds設為0
+    - name: "🔍 測試B: pause seconds=0"
+      ansible.builtin.pause:
         seconds: 0
-
-    # ==================== 測試3: 分割成多個debug ====================
-    - name: "🔍 測試3a: 分割debug - 標題"
-      ansible.builtin.debug:
-        msg: "📊 階段測試: 分割成多個debug"
-
-    - name: "🔍 測試3b: 分割debug - 基本參數"
-      ansible.builtin.debug:
-        msg: "基本參數: IP={{ test_ip }}, MAC={{ test_mac }}, 描述={{ test_description }}, 操作={{ test_operation }}"
-
-    - name: "🔍 測試3c: 分割debug - 詳細資訊"
-      ansible.builtin.debug:
-        msg: "詳細資訊: Group Members={{ test_group_members }}, 需要執行=是, 狀態=正常"
-
-    # ==================== 測試4: 使用assert模組 ====================
-    - name: "🔍 測試4: assert模組"
-      ansible.builtin.assert:
-        that: true
-        success_msg: |
-          📊 階段測試: assert模組
+        prompt: |
+          📊 測試B: seconds=0
           
           基本參數:
-          - IP: {{ test_ip }}
-          - MAC: {{ test_mac }}
-          - 描述: {{ test_description }}
-          - 操作類型: {{ test_operation }}
-          
-          詳細資訊:
-          - Group Members數: {{ test_group_members }}
-          - 需要執行: 是
-          - 狀態: 正常
+          - IP: 172.23.40.172
+          - MAC: aa:bb:cc:dd:ee:ff
 
-    # ==================== 測試5: fail模組 (但設定為不失敗) ====================
-    - name: "🔍 測試5: fail模組 (示範用，不會真的失敗)"
-      ansible.builtin.debug:
-        msg: "註：fail模組會中斷執行，此處僅示範格式"
-
-    # ==================== 測試6: 使用set_fact + debug ====================
-    - name: "🔍 測試6a: 設定複雜訊息變數"
-      ansible.builtin.set_fact:
-        complex_message: |
-          📊 階段測試: set_fact + debug組合
+    # 測試3: 只用prompt，無seconds
+    - name: "🔍 測試C: 只用prompt"
+      ansible.builtin.pause:
+        prompt: |
+          📊 測試C: 只用prompt無seconds
           
           基本參數:
-          - IP: {{ test_ip }}
-          - MAC: {{ test_mac }}
-          - 描述: {{ test_description }}
-          - 操作類型: {{ test_operation }}
-          
-          詳細資訊:
-          - Group Members數: {{ test_group_members }}
-          - 需要執行: 是
-          - 狀態: 正常
-
-    - name: "🔍 測試6b: 顯示複雜訊息"
-      ansible.builtin.debug:
-        msg: "{{ complex_message }}"
-
-    # ==================== 測試7: 不同的YAML格式 ====================
-    - name: "🔍 測試7: 不同YAML格式 (使用 > 符號)"
-      ansible.builtin.debug:
-        msg: >
-          📊 階段測試: 使用>符號格式
-          
-          基本參數: IP={{ test_ip }}, MAC={{ test_mac }}, 描述={{ test_description }}, 操作={{ test_operation }}
-          
-          詳細資訊: Group Members={{ test_group_members }}, 需要執行=是, 狀態=正常
-
-    # ==================== 測試結束 ====================
-    - name: "🧪 測試結束"
-      ansible.builtin.debug:
-        msg: "==================== 測試完成，請檢查上述輸出格式 ===================="
+          - IP: 172.23.40.172
+          - MAC: aa:bb:cc:dd:ee:ff
