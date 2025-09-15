@@ -169,29 +169,12 @@
         server_config: "{{ dhcp_server_config.json.results | first }}"
         api_ip_range_start: "{{ (dhcp_server_config.json.results | first)['ip-range'][0]['start-ip'] }}"
         api_ip_range_end: "{{ (dhcp_server_config.json.results | first)['ip-range'][0]['end-ip'] }}"
-        api_network_prefix: "{{ (dhcp_server_config.json.results | first)['ip-range'][0]['start-ip'].split('.')[0:3] | join('.') }}"
-        target_network_prefix: "{{ target_ip.split('.')[0:3] | join('.') }}"
-
-    - name: "🔍 Check Network Segment Match"
-      ansible.builtin.fail:
-        msg: |
-          ❌ 目標IP網段與DHCP Server不匹配！
-          
-          詳情：
-          - 目標IP: {{ target_ip }} (網段: {{ target_network_prefix }})
-          - DHCP Server ID: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }})
-          - DHCP Server網段: {{ api_network_prefix }}
-          - API原始範圍: {{ api_ip_range_start }} - {{ api_ip_range_end }}
-          
-          解決方案：
-          1. 選擇正確的DHCP Server ID
-          2. 或者使用 {{ api_network_prefix }}.x 格式的IP地址
-      when: target_network_prefix != api_network_prefix
+        ip_network_prefix: "{{ (dhcp_server_config.json.results | first)['ip-range'][0]['start-ip'].split('.')[0:3] | join('.') }}"
 
     - name: "🔧 Apply Custom IP Range Rules"
       ansible.builtin.set_fact:
-        ip_range_start: "{{ target_network_prefix }}.{{ custom_ip_range_mapping[target_dhcp_server_id].start_suffix }}"
-        ip_range_end: "{{ target_network_prefix }}.{{ custom_ip_range_mapping[target_dhcp_server_id].end_suffix }}"
+        ip_range_start: "{{ ip_network_prefix }}.{{ custom_ip_range_mapping[target_dhcp_server_id].start_suffix }}"
+        ip_range_end: "{{ ip_network_prefix }}.{{ custom_ip_range_mapping[target_dhcp_server_id].end_suffix }}"
 
     - name: "🔍 Check IP Within Custom Range"
       ansible.builtin.set_fact:
@@ -205,12 +188,12 @@
           詳情：
           - 目標IP: {{ target_ip }}
           - DHCP Server ID: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }})
-          - 目標網段: {{ target_network_prefix }}
           - 自定義允許範圍: {{ ip_range_start }} - {{ ip_range_end }}
+          - 網段前綴: {{ ip_network_prefix }} (從API讀取)
           - API原始範圍: {{ api_ip_range_start }} - {{ api_ip_range_end }}
           
           解決方案：
-          1. 選擇自定義範圍內的IP地址 ({{ ip_range_start }} - {{ ip_range_end }})
+          1. 選擇自定義範圍內的IP地址
           2. 或者選擇正確的DHCP Server ID
       when: not ip_in_range
 
