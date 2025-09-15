@@ -203,8 +203,9 @@
         msg: "==================== FortiGate DHCP Reserved Create&Update Preview v2.2 ===================="
 
     - name: "📋 Three-Stage Preview Parameters Summary"
-      ansible.builtin.debug:
-        msg: |
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
           🔍 三階段整合預覽模式 v2.2
           
           輸入參數:
@@ -219,10 +220,6 @@
           - 階段1: DHCP Reserved Address
           - 階段2: Firewall Address Object ({{ target_address_name }})
           - 階段3: Address Group Member ({{ target_address_group }})
-
-    - name: "⏸️ Format Output Pause"
-      ansible.builtin.pause:
-        seconds: 1
 
     # ==================== 階段1: DHCP 配置分析區塊 ====================
     - name: "📊 Stage 1: DHCP Configuration Analysis Section Header"
@@ -379,8 +376,9 @@
         msg: "==================== 三階段配置變更預覽 ===================="
 
     - name: "📊 Stage 1: DHCP Operation Analysis"
-      ansible.builtin.debug:
-        msg: |
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
           📊 階段1: DHCP 操作分析
           
           操作類型: {{ dhcp_operation_type }}
@@ -402,13 +400,10 @@
           - 描述: {{ target_description }}
           {% endif %}
 
-    - name: "⏸️ Format Output Pause"
-      ansible.builtin.pause:
-        seconds: 1
-
     - name: "📊 Stage 2: Address Object Operation Analysis"
-      ansible.builtin.debug:
-        msg: |
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
           📊 階段2: Address Object 操作分析
           
           Address Name: {{ target_address_name }}
@@ -431,13 +426,10 @@
           - MAC: {{ normalized_mac }}
           {% endif %}
 
-    - name: "⏸️ Format Output Pause"
-      ansible.builtin.pause:
-        seconds: 1
-
     - name: "📊 Stage 3: Address Group Operation Analysis"
-      ansible.builtin.debug:
-        msg: |
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
           📊 階段3: Address Group 操作分析
           
           Group Name: {{ target_address_group }}
@@ -448,14 +440,11 @@
           操作後Members數: {{ updated_group_members | length }}
           {% endif %}
 
-    - name: "⏸️ Format Output Pause"
-      ansible.builtin.pause:
-        seconds: 1
-
     # ==================== 整合操作摘要 ====================
     - name: "📊 Integrated Operations Summary"
-      ansible.builtin.debug:
-        msg: |
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
           📊 三階段操作總覽 v2.2
           
           階段1 (DHCP): {{ '✅需要執行' if dhcp_needs_operation else '⏭️跳過' }} ({{ dhcp_operation_type }})
@@ -465,27 +454,16 @@
           執行條件: 前一階段成功才執行下一階段
           回滾機制: 後續階段失敗會回滾前面所有已完成的配置
 
-    - name: "⏸️ Format Output Pause"
-      ansible.builtin.pause:
-        seconds: 1
-
     - name: "ℹ️ No Operations Required"
-      ansible.builtin.debug:
-        msg: |
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
           ℹ️ 所有階段檢查完成 v2.2
           
           目前所有配置都已符合目標狀態，無需執行任何變更操作:
           - DHCP Reserved Address: 已正確配置
           - Firewall Address Object: 已正確配置  
           - Address Group Member: 已包含目標Address
-      when: 
-        - not dhcp_needs_operation
-        - not address_needs_operation  
-        - not group_needs_operation
-
-    - name: "⏸️ Format Output Pause"
-      ansible.builtin.pause:
-        seconds: 1
       when: 
         - not dhcp_needs_operation
         - not address_needs_operation  
@@ -527,8 +505,9 @@
 
     # ==================== 操作警告 ====================
     - name: "⚠️ Three-Stage Configuration Change Warning"
-      ansible.builtin.debug:
-        msg: |
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
           ⚠️ 三階段操作警告 v2.2
           
           此操作將依序執行以下配置變更：
@@ -543,11 +522,6 @@
           {% endif %}
           
           請在Approval Node中仔細確認所有階段的變更後再批准執行！
-      when: dhcp_needs_operation or address_needs_operation or group_needs_operation
-
-    - name: "⏸️ Format Output Pause"
-      ansible.builtin.pause:
-        seconds: 1
       when: dhcp_needs_operation or address_needs_operation or group_needs_operation
 
     # ==================== 計算預覽時間 ====================
