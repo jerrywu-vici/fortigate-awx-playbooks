@@ -129,8 +129,9 @@
         msg: "==================== FortiGate DHCP Reserved Create&Update Execute v2.2 ===================="
 
     - name: "🚀 Execute Parameters Summary"
-      ansible.builtin.debug:
-        msg: |
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
           🚀 三階段整合執行模式 v2.2 | 已通過人工確認
           
           基本參數:
@@ -144,13 +145,10 @@
           - 階段2 (Address): {{ '啟用' if address_needs_operation else '跳過' }} ({{ address_operation_type }})
           - 階段3 (Group): {{ '啟用' if group_needs_operation else '跳過' }} (ADD_MEMBER)
 
-    - name: "⏸️ Format Output Pause"
-      ansible.builtin.pause:
-        seconds: 1
-
     - name: "📊 Operations Overview"
-      ansible.builtin.debug:
-        msg: |
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
           📊 操作概覽 v2.2
           
           DHCP Server: {{ server_info.dhcp_description | default('N/A') }}
@@ -158,28 +156,17 @@
           Address Group: {{ group_name }}
           執行策略: 順序執行，失敗即回滾
 
-    - name: "⏸️ Format Output Pause"
-      ansible.builtin.pause:
-        seconds: 1
-
     # ==================== 無需操作處理 ====================
     - name: "ℹ️ No Operations Required"
-      ansible.builtin.debug:
-        msg: |
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
           ℹ️ 所有階段都無需執行操作 v2.2
           
           當前配置已符合目標狀態:
           - DHCP Reserved Address: 已正確配置
           - Firewall Address Object: 已正確配置
           - Address Group Member: 已包含目標Address
-      when: 
-        - not dhcp_needs_operation
-        - not address_needs_operation
-        - not group_needs_operation
-
-    - name: "⏸️ Format Output Pause"
-      ansible.builtin.pause:
-        seconds: 1
       when: 
         - not dhcp_needs_operation
         - not address_needs_operation
@@ -256,8 +243,9 @@
         - (dhcp_create_result.status == 200 if dhcp_operation_type == 'CREATE' else dhcp_update_result.status == 200)
 
     - name: "✅ Stage 1: DHCP Operation Success Message"
-      ansible.builtin.debug:
-        msg: |
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
           ✅ 階段1: DHCP {{ dhcp_operation_type }}操作成功
           
           配置詳情:
@@ -270,11 +258,6 @@
           - MAC地址: {{ target_mac }}
           - 描述: {{ target_description }}
           - DHCP Server: {{ server_id }}
-      when: stage1_completed
-
-    - name: "⏸️ Format Output Pause"
-      ansible.builtin.pause:
-        seconds: 1
       when: stage1_completed
 
     - name: "❌ Stage 1: DHCP Operation Failed"
@@ -351,8 +334,9 @@
         - (address_create_result.status == 200 if address_operation_type == 'CREATE' else address_update_result.status == 200)
 
     - name: "✅ Stage 2: Address Operation Success Message"
-      ansible.builtin.debug:
-        msg: |
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
           ✅ 階段2: Address Object {{ address_operation_type }}操作成功
           
           配置詳情:
@@ -360,11 +344,6 @@
           - Type: mac
           - Comment: {{ target_ip }}
           - MAC Address: {{ target_mac }}
-      when: stage2_completed
-
-    - name: "⏸️ Format Output Pause"
-      ansible.builtin.pause:
-        seconds: 1
       when: stage2_completed
 
     - name: "❌ Stage 2: Address Operation Failed - Initiating Rollback"
@@ -436,8 +415,9 @@
         - group_add_result.status == 200
 
     - name: "✅ Stage 3: Group Operation Success Message"
-      ansible.builtin.debug:
-        msg: |
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
           ✅ 階段3: Address Group Member 加入操作成功
           
           配置詳情:
@@ -445,11 +425,6 @@
           - 新增Member: {{ address_name }}
           - 原Members數: {{ original_group_members | length }}
           - 新Members數: {{ updated_group_members | length }}
-      when: stage3_completed
-
-    - name: "⏸️ Format Output Pause"
-      ansible.builtin.pause:
-        seconds: 1
       when: stage3_completed
 
     - name: "❌ Stage 3: Group Operation Failed - Initiating Full Rollback"
@@ -570,8 +545,9 @@
       when: stage3_completed
 
     - name: "✅ Three-Stage Verification Results"
-      ansible.builtin.debug:
-        msg: |
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
           ✅ 三階段操作驗證結果 v2.2
           
           {% if stage1_completed and dhcp_verification is defined %}
@@ -583,10 +559,6 @@
           {% if stage3_completed and group_verification is defined %}
           階段3 (Group): ✅驗證通過 | Members數: {{ (group_verification.json.results | first).member | length }} | Address已加入: {{ address_name in (group_verification.json.results | first).member | map(attribute='name') | list }}
           {% endif %}
-
-    - name: "⏸️ Format Output Pause"
-      ansible.builtin.pause:
-        seconds: 1
 
     # ==================== 計算執行時間 ====================
     - name: "⏱️ Calculate Execution Statistics"
@@ -601,9 +573,11 @@
     - name: "📊 Final Summary Section Header"
       ansible.builtin.debug:
         msg: "==================== 三階段操作最終摘要 ===================="
-        - name: "📊 Three-Stage Operation Results Summary"
-      ansible.builtin.debug:
-        msg: |
+
+    - name: "📊 Three-Stage Operation Results Summary"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
           📊 三階段整合操作結果摘要 v2.2
           
           目標配置:
@@ -653,13 +627,10 @@
             ⚠️ 部分階段執行失敗，已執行相應的回滾操作。
           {%- endif -%}
 
-    - name: "⏸️ Format Output Pause"
-      ansible.builtin.pause:
-        seconds: 1
-
     - name: "📊 Environment Configuration Details"
-      ansible.builtin.debug:
-        msg: |
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
           📊 環境配置詳情 v2.2
           
           DHCP Server: {{ server_id }} ({{ server_info.dhcp_description | default('N/A') }})
@@ -674,10 +645,6 @@
           {% endif %}
           執行模式: 三階段整合自動化
           版本: v2.2
-
-    - name: "⏸️ Format Output Pause"
-      ansible.builtin.pause:
-        seconds: 1
 
     - name: "📅 Completion Information"
       ansible.builtin.debug:
