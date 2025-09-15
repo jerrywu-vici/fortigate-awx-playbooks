@@ -164,12 +164,13 @@
       retries: "{{ api_retries }}"
       delay: "{{ api_delay }}"
 
-    - name: "🔍 Extract API Network Prefix"
+    # ==================== 原始正確的IP範圍判斷邏輯 ====================
+    - name: "🔍 Extract Target IP Network Prefix"
       ansible.builtin.set_fact:
         server_config: "{{ dhcp_server_config.json.results | first }}"
         api_ip_range_start: "{{ (dhcp_server_config.json.results | first)['ip-range'][0]['start-ip'] }}"
         api_ip_range_end: "{{ (dhcp_server_config.json.results | first)['ip-range'][0]['end-ip'] }}"
-        ip_network_prefix: "{{ (dhcp_server_config.json.results | first)['ip-range'][0]['start-ip'].split('.')[0:3] | join('.') }}"
+        ip_network_prefix: "{{ target_ip.split('.')[0:3] | join('.') }}"
 
     - name: "🔧 Apply Custom IP Range Rules"
       ansible.builtin.set_fact:
@@ -189,7 +190,7 @@
           - 目標IP: {{ target_ip }}
           - DHCP Server ID: {{ target_dhcp_server_id }} ({{ server_info.dhcp_description }})
           - 自定義允許範圍: {{ ip_range_start }} - {{ ip_range_end }}
-          - 網段前綴: {{ ip_network_prefix }} (從API讀取)
+          - 網段前綴: {{ ip_network_prefix }} (從目標IP提取)
           - API原始範圍: {{ api_ip_range_start }} - {{ api_ip_range_end }}
           
           解決方案：
@@ -580,6 +581,7 @@
           wf_address_exists: "{{ address_exists }}"
           # 階段3: Group 變數
           wf_group_name: "{{ target_address_group }}"
+          wf_group_needs_operation: "
           wf_group_needs_operation: "{{ group_needs_operation }}"
           wf_address_in_group: "{{ address_in_group }}"
           wf_original_group_members: "{{ original_group_members | default([]) | to_json }}"
