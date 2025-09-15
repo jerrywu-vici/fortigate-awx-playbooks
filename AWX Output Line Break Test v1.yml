@@ -9,16 +9,6 @@
       ansible.builtin.debug:
         msg: "開始測試pause參數"
 
-    # 測試1: 不設定seconds參數
-    - name: "🔍 測試A: pause不設定seconds"
-      ansible.builtin.pause:
-        prompt: |
-          📊 測試A: 不設定seconds參數
-          
-          基本參數:
-          - IP: 172.23.40.172
-          - MAC: aa:bb:cc:dd:ee:ff
-
     # 測試2: seconds設為0
     - name: "🔍 測試B: pause seconds=0"
       ansible.builtin.pause:
