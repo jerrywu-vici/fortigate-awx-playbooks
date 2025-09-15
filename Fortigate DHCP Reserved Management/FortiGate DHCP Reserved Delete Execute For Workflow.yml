@@ -1,15 +1,15 @@
 ---
 # =============================================================================
-# FortiGate DHCP Reserved Address Delete + Firewall Address Delete Execute v6.0
+# FortiGate DHCP Reserved Address Delete + Firewall Address Delete Execute v6.1
 # 用途：執行實際的MAC刪除操作（DHCP + Firewall Address）
 # 功能：1. DHCP MAC還原為Reserved 2. Firewall Address從Group移除並刪除
 # 執行順序：DHCP還原 → Address Group移除 → Address Object刪除
 # 輸入：接收Preview步驟的workflow變數（包含DHCP和Firewall資訊）
 # 輸出：執行結果和操作摘要
-# 版本：v6.0 - 優化代碼結構，統一版本號
+# 版本：v6.1 - 使用pause模組修正輸出斷行問題
 # =============================================================================
 
-- name: FortiGate DHCP Reserved Delete Execute For Workflow v6.0
+- name: FortiGate DHCP Reserved Delete Execute For Workflow v6.1
   hosts: localhost
   connection: local
   gather_facts: true
@@ -93,15 +93,29 @@
     # ==================== 執行資訊顯示 ====================
     - name: "📋 Execution Information Header"
       ansible.builtin.debug:
-        msg: "==================== FortiGate DHCP + Firewall Delete Execute v6.0 ===================="
+        msg: "==================== FortiGate DHCP + Firewall Delete Execute v6.1 ===================="
 
     - name: "🚀 Execute Parameters Summary"
-      ansible.builtin.debug:
-        msg: "🚀 整合執行模式 | 已通過人工確認 | MAC: {{ delete_mac }} | DHCP: {{ 'ON' if dhcp_enabled else 'OFF' }} | Firewall: {{ 'ON' if firewall_enabled else 'OFF' }} | Server: {{ server_id }}"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          🚀 整合執行模式 | 已通過人工確認
+          
+          MAC: {{ delete_mac }}
+          DHCP: {{ 'ON' if dhcp_enabled else 'OFF' }}
+          Firewall: {{ 'ON' if firewall_enabled else 'OFF' }}
+          Server: {{ server_id }}
 
     - name: "📊 Operations Overview"
-      ansible.builtin.debug:
-        msg: "📊 操作概覽 | DHCP Server: {{ server_info.dhcp_description | default('N/A') }} | Address Group: {{ address_group_name }} | Address Object: {{ firewall_address_name | default('N/A') }} | Address在Group中: {{ address_in_group }}"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          📊 操作概覽
+          
+          DHCP Server: {{ server_info.dhcp_description | default('N/A') }}
+          Address Group: {{ address_group_name }}
+          Address Object: {{ firewall_address_name | default('N/A') }}
+          Address在Group中: {{ address_in_group }}
 
     # ==================== DHCP 執行區塊 ====================
     - name: "📊 DHCP Execution Section Header"
@@ -158,8 +172,14 @@
       when: dhcp_enabled
 
     - name: "🎉 DHCP Operation Success"
-      ansible.builtin.debug:
-        msg: "✅ DHCP操作成功 | ID: {{ dhcp_target_id }} | IP: {{ dhcp_target_ip }} | MAC: {{ dhcp_original_mac }}→{{ dhcp_reserved_mac }}"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          ✅ DHCP操作成功
+          
+          ID: {{ dhcp_target_id }}
+          IP: {{ dhcp_target_ip }}
+          MAC: {{ dhcp_original_mac }}→{{ dhcp_reserved_mac }}
       when: 
         - dhcp_enabled
         - dhcp_result.status == 200
@@ -183,8 +203,14 @@
       when: firewall_enabled
 
     - name: "📋 Firewall Execution Plan"
-      ansible.builtin.debug:
-        msg: "📋 執行計劃 | Step 1: {{ '從Group移除Member' if address_in_group else '跳過Group更新' }} | Step 2: 刪除Address Object | Address: {{ firewall_address_name }}"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          📋 執行計劃
+          
+          Step 1: {{ '從Group移除Member' if address_in_group else '跳過Group更新' }}
+          Step 2: 刪除Address Object
+          Address: {{ firewall_address_name }}
       when: firewall_enabled
 
     # Step 1: Firewall Address Group 更新（移除member）
@@ -208,8 +234,14 @@
         - address_in_group
 
     - name: "🎉 Address Group Update Success"
-      ansible.builtin.debug:
-        msg: "✅ Address Group更新成功 | Group: {{ address_group_name }} | 移除Member: {{ firewall_address_name }} | 剩餘Members: {{ updated_group_members | length }}"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          ✅ Address Group更新成功
+          
+          Group: {{ address_group_name }}
+          移除Member: {{ firewall_address_name }}
+          剩餘Members: {{ updated_group_members | length }}
       when: 
         - firewall_enabled
         - address_in_group
@@ -224,8 +256,12 @@
         - group_update_result.status != 200
 
     - name: "ℹ️ Address Not in Group - Skip Group Update"
-      ansible.builtin.debug:
-        msg: "ℹ️ Address {{ firewall_address_name }} 不在 Group {{ address_group_name }} 中，跳過Group更新，直接進行Address刪除"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          ℹ️ Address {{ firewall_address_name }} 不在 Group {{ address_group_name }} 中
+          
+          跳過Group更新，直接進行Address刪除
       when: 
         - firewall_enabled
         - not address_in_group
@@ -248,8 +284,14 @@
         - (not address_in_group) or (address_in_group and group_update_result.status == 200)
 
     - name: "🎉 Firewall Address Delete Success"
-      ansible.builtin.debug:
-        msg: "✅ Address刪除成功 | Name: {{ firewall_address_name }} | MAC: {{ firewall_address_mac }} | Comment: {{ firewall_address_comment }}"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          ✅ Address刪除成功
+          
+          Name: {{ firewall_address_name }}
+          MAC: {{ firewall_address_mac }}
+          Comment: {{ firewall_address_comment }}
       when: 
         - firewall_enabled
         - address_delete_result.status == 200
@@ -289,8 +331,13 @@
         - dhcp_result.status == 200
 
     - name: "✅ DHCP Verification Result"
-      ansible.builtin.debug:
-        msg: "✅ DHCP驗證通過 | 當前MAC: {{ (dhcp_verification.json.results | first).mac }} | 當前描述: {{ (dhcp_verification.json.results | first).description }}"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          ✅ DHCP驗證通過
+          
+          當前MAC: {{ (dhcp_verification.json.results | first).mac }}
+          當前描述: {{ (dhcp_verification.json.results | first).description }}
       when: 
         - dhcp_enabled
         - dhcp_verification is defined
@@ -340,8 +387,14 @@
         - group_update_result.status == 200
 
     - name: "✅ Address Group Verification"
-      ansible.builtin.debug:
-        msg: "✅ Address Group驗證通過 | Group: {{ address_group_name }} | 當前Members數: {{ (group_verification.json.results | first).member | length }} | Address已移除: {{ firewall_address_name not in (group_verification.json.results | first).member | map(attribute='name') | list }}"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          ✅ Address Group驗證通過
+          
+          Group: {{ address_group_name }}
+          當前Members數: {{ (group_verification.json.results | first).member | length }}
+          Address已移除: {{ firewall_address_name not in (group_verification.json.results | first).member | map(attribute='name') | list }}
       when: 
         - firewall_enabled
         - group_verification is defined
@@ -355,20 +408,39 @@
         msg: "==================== 最終摘要 ===================="
 
     - name: "📊 Integrated Operation Results"
-      ansible.builtin.debug:
-        msg: "📊 整合操作結果 | MAC: {{ delete_mac }} | DHCP: {{ dhcp_status }} | Firewall: {{ firewall_status }}"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          📊 整合操作結果
+          
+          MAC: {{ delete_mac }}
+          DHCP: {{ dhcp_status }}
+          Firewall: {{ firewall_status }}
       vars:
         dhcp_status: "{{ '✅成功' if (dhcp_enabled and dhcp_result is defined and dhcp_result.status == 200) else ('⏭️跳過' if not dhcp_enabled else '❌失敗') }}"
         firewall_status: "{{ '✅成功' if (firewall_enabled and address_delete_result is defined and address_delete_result.status == 200) else ('⏭️跳過' if not firewall_enabled else '❌失敗') }}"
 
     - name: "📊 DHCP Summary"
-      ansible.builtin.debug:
-        msg: "📊 DHCP摘要 | Server: {{ server_id }} ({{ server_info.dhcp_description | default('N/A') }}) | {{ dhcp_original_mac }}→{{ dhcp_reserved_mac }} | 描述: Reserved"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          📊 DHCP摘要
+          
+          Server: {{ server_id }} ({{ server_info.dhcp_description | default('N/A') }})
+          {{ dhcp_original_mac }}→{{ dhcp_reserved_mac }}
+          描述: Reserved
       when: dhcp_enabled
 
     - name: "📊 Firewall Summary"
-      ansible.builtin.debug:
-        msg: "📊 Firewall摘要 | Address: {{ firewall_address_name }} | Group: {{ address_group_name }} | Group更新: {{ group_status }} | Address刪除: {{ address_status }}"
+      ansible.builtin.pause:
+        seconds: 0
+        prompt: |
+          📊 Firewall摘要
+          
+          Address: {{ firewall_address_name }}
+          Group: {{ address_group_name }}
+          Group更新: {{ group_status }}
+          Address刪除: {{ address_status }}
       vars:
         group_status: "{{ '✅成功' if (address_in_group and group_update_result is defined and group_update_result.status == 200) else ('⏭️跳過' if not address_in_group else '❌失敗') }}"
         address_status: "{{ '✅成功' if (address_delete_result is defined and address_delete_result.status == 200) else '❌失敗' }}"
@@ -376,4 +448,4 @@
 
     - name: "📅 Completion Information"
       ansible.builtin.debug:
-        msg: "📅 完成時間: {{ ansible_date_time.iso8601 }} | 版本: v6.0"
+        msg: "📅 完成時間: {{ ansible_date_time.iso8601 }} | 版本: v6.1"
