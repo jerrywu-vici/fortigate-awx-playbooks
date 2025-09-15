@@ -581,7 +581,6 @@
           wf_address_exists: "{{ address_exists }}"
           # 階段3: Group 變數
           wf_group_name: "{{ target_address_group }}"
-          wf_group_needs_operation: "
           wf_group_needs_operation: "{{ group_needs_operation }}"
           wf_address_in_group: "{{ address_in_group }}"
           wf_original_group_members: "{{ original_group_members | default([]) | to_json }}"
