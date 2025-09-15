@@ -556,18 +556,18 @@
       when: stage2_completed
 
     - name: "🔍 Verify Stage 3: Address Group"
-      ansible.builtin.uri:
-        url: "https://{{ fortigate_host }}/api/v2/cmdb/firewall/addrgrp/{{ group_name }}"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ fortigate_token }}"
-          validate_certs: "{{ validate_certs }}"
-        status_code: 200
-        timeout: "{{ connection_timeout }}"
-      register: group_verification
-      retries: "{{ api_retries }}"
-      delay: "{{ api_delay }}"
-      when: stage3_completed
+  ansible.builtin.uri:
+    url: "https://{{ fortigate_host }}/api/v2/cmdb/firewall/addrgrp/{{ group_name | urlencode }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ fortigate_token }}"
+    validate_certs: "{{ validate_certs }}"
+    status_code: 200
+    timeout: "{{ connection_timeout }}"
+  register: group_verification
+  retries: "{{ api_retries }}"
+  delay: "{{ api_delay }}"
+  when: stage3_completed
 
     - name: "✅ Three-Stage Verification Results"
       ansible.builtin.debug:
